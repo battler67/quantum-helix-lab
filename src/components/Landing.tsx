@@ -1,4 +1,4 @@
-import { motion } from "framer-motion";
+import { motion, type Variants } from "framer-motion";
 import { Link } from "@tanstack/react-router";
 import {
   Atom, Binary, Dna, Search, LineChart, Sparkles, Upload, Cpu, BrainCircuit, Gauge,
@@ -7,12 +7,12 @@ import {
 import { DNAHelix } from "@/components/DNAHelix";
 import { BackgroundFX } from "@/components/BackgroundFX";
 
-const fadeUp = {
+const fadeUp: Variants = {
   hidden: { opacity: 0, y: 24, filter: "blur(8px)" },
-  show: { opacity: 1, y: 0, filter: "blur(0px)", transition: { duration: 0.7, ease: [0.22, 1, 0.36, 1] } },
+  show: { opacity: 1, y: 0, filter: "blur(0px)", transition: { duration: 0.7, ease: [0.22, 1, 0.36, 1] as const } },
 };
 
-const stagger = { show: { transition: { staggerChildren: 0.08 } } };
+const stagger: Variants = { show: { transition: { staggerChildren: 0.08 } } };
 
 const floatingFeatures = [
   { icon: Cpu, label: "Quantum Computing", tone: "from-emerald-400/30 to-emerald-600/10" },
