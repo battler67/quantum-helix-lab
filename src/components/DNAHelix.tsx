@@ -74,6 +74,7 @@ function HelixStrand({ mouse }: { mouse: React.MutableRefObject<{ x: number; y: 
       {/* backbone tubes */}
       <BackboneTube offset={0} />
       <BackboneTube offset={Math.PI} />
+     </group>
     </group>
   );
 }
