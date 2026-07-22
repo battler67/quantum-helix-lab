@@ -35,22 +35,24 @@ function HelixStrand({ mouse }: { mouse: React.MutableRefObject<{ x: number; y: 
     return rungs;
   }, [nucleotides]);
 
-  useFrame((state, delta) => {
-    if (!group.current) return;
-    group.current.rotation.y += delta * 0.35;
-    // Diagonal drift: bottom-left -> top-right, looping smoothly
-    const period = 8;
-    const t = ((state.clock.elapsedTime % period) / period);
-    const range = 6;
-    group.current.position.x = -range / 2 + t * range;
-    group.current.position.y = -range / 2 + t * range;
-    // Tilt helix so its long axis aligns with the diagonal motion
-    group.current.rotation.z = THREE.MathUtils.lerp(group.current.rotation.z, -Math.PI / 4 + mouse.current.x * 0.1, 0.05);
-    group.current.rotation.x = THREE.MathUtils.lerp(group.current.rotation.x, mouse.current.y * 0.2, 0.05);
+  const inner = useRef<THREE.Group>(null!);
+
+  useFrame((_, delta) => {
+    if (!inner.current || !group.current) return;
+    // Spin around the strand's own central (Y) axis
+    inner.current.rotation.y += delta * 0.6;
+    // Mouse parallax: subtle viewing-angle shift on the outer (tilted) group
+    const targetX = mouse.current.y * 0.25;
+    const targetY = mouse.current.x * 0.35;
+    group.current.rotation.x = THREE.MathUtils.lerp(group.current.rotation.x, targetX, 0.05);
+    // Base tilt: diagonal bottom-left -> top-right (rotate around Z), plus parallax yaw
+    group.current.rotation.z = THREE.MathUtils.lerp(group.current.rotation.z, -Math.PI / 4, 0.05);
+    group.current.position.x = THREE.MathUtils.lerp(group.current.position.x, targetY * 0.2, 0.05);
   });
 
   return (
     <group ref={group}>
+     <group ref={inner}>
       {nucleotides.map((n, i) => (
         <mesh key={i} position={n.pos}>
           <sphereGeometry args={[0.18, 24, 24]} />
@@ -72,6 +74,7 @@ function HelixStrand({ mouse }: { mouse: React.MutableRefObject<{ x: number; y: 
       {/* backbone tubes */}
       <BackboneTube offset={0} />
       <BackboneTube offset={Math.PI} />
+     </group>
     </group>
   );
 }
@@ -140,9 +143,7 @@ export function DNAHelix({ className = "" }: { className?: string }) {
           <ambientLight intensity={0.3} />
           <pointLight position={[5, 5, 5]} intensity={2} color="#10B981" />
           <pointLight position={[-5, -5, -5]} intensity={1.5} color="#38bdf8" />
-          <Float speed={1.2} rotationIntensity={0.2} floatIntensity={0.4}>
-            <HelixStrand mouse={mouse} />
-          </Float>
+          <HelixStrand mouse={mouse} />
           <Particles />
           <Environment preset="night" />
         </Suspense>
