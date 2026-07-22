@@ -38,9 +38,15 @@ function HelixStrand({ mouse }: { mouse: React.MutableRefObject<{ x: number; y: 
   useFrame((state, delta) => {
     if (!group.current) return;
     group.current.rotation.y += delta * 0.35;
-    group.current.position.y = Math.sin(state.clock.elapsedTime * 0.6) * 0.25;
+    // Diagonal drift: bottom-left -> top-right, looping smoothly
+    const period = 8;
+    const t = ((state.clock.elapsedTime % period) / period);
+    const range = 6;
+    group.current.position.x = -range / 2 + t * range;
+    group.current.position.y = -range / 2 + t * range;
+    // Tilt helix so its long axis aligns with the diagonal motion
+    group.current.rotation.z = THREE.MathUtils.lerp(group.current.rotation.z, -Math.PI / 4 + mouse.current.x * 0.1, 0.05);
     group.current.rotation.x = THREE.MathUtils.lerp(group.current.rotation.x, mouse.current.y * 0.2, 0.05);
-    group.current.rotation.z = THREE.MathUtils.lerp(group.current.rotation.z, mouse.current.x * 0.1, 0.05);
   });
 
   return (
