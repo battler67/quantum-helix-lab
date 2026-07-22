@@ -143,9 +143,7 @@ export function DNAHelix({ className = "" }: { className?: string }) {
           <ambientLight intensity={0.3} />
           <pointLight position={[5, 5, 5]} intensity={2} color="#10B981" />
           <pointLight position={[-5, -5, -5]} intensity={1.5} color="#38bdf8" />
-          <Float speed={1.2} rotationIntensity={0.2} floatIntensity={0.4}>
-            <HelixStrand mouse={mouse} />
-          </Float>
+          <HelixStrand mouse={mouse} />
           <Particles />
           <Environment preset="night" />
         </Suspense>
