@@ -105,6 +105,24 @@
   h1, h2, h3, h4 { font-family: var(--font-display); letter-spacing: -0.02em; }
 }
 
+@layer components {
+  .theme-select {
+    color-scheme: dark;
+    background-color: color-mix(in oklab, black 30%, transparent);
+    color: var(--color-foreground);
+  }
+
+  .theme-select option {
+    background-color: var(--color-popover);
+    color: var(--color-popover-foreground);
+  }
+
+  .theme-select option:checked {
+    background-color: var(--color-accent);
+    color: var(--color-accent-foreground);
+  }
+}
+
 @utility glass {
   background: color-mix(in oklab, var(--color-card) 60%, transparent);
   backdrop-filter: blur(18px) saturate(140%);

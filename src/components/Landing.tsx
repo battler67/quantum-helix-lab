@@ -52,6 +52,7 @@ export function Landing() {
             <a href="#features" className="hover:text-foreground transition">Features</a>
             <a href="#research" className="hover:text-foreground transition">Research</a>
             <a href="#pipeline" className="hover:text-foreground transition">Pipeline</a>
+            <Link to="/ncbi/search" className="hover:text-foreground transition">NCBI Search</Link>
             <a href="#" className="flex items-center gap-1 hover:text-foreground transition"><Github className="h-4 w-4" /> GitHub</a>
           </nav>
           <Link to="/dashboard" className="group relative inline-flex items-center gap-1.5 rounded-full border border-emerald/40 bg-emerald/10 px-4 py-1.5 text-sm font-medium text-emerald transition hover:bg-emerald/20">

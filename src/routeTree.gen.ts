@@ -9,9 +9,24 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as QuantumSearchResultsRouteImport } from './routes/quantum-search-results'
+import { Route as QuantumSearchRouteImport } from './routes/quantum-search'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as NcbiSearchRouteImport } from './routes/ncbi.search'
+import { Route as NcbiRecordAccessionRouteImport } from './routes/ncbi.record.$accession'
+import { Route as NcbiOrganismTaxIdRouteImport } from './routes/ncbi.organism.$taxId'
 
+const QuantumSearchResultsRoute = QuantumSearchResultsRouteImport.update({
+  id: '/quantum-search-results',
+  path: '/quantum-search-results',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const QuantumSearchRoute = QuantumSearchRouteImport.update({
+  id: '/quantum-search',
+  path: '/quantum-search',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DashboardRoute = DashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
@@ -22,35 +37,106 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const NcbiSearchRoute = NcbiSearchRouteImport.update({
+  id: '/ncbi/search',
+  path: '/ncbi/search',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const NcbiRecordAccessionRoute = NcbiRecordAccessionRouteImport.update({
+  id: '/ncbi/record/$accession',
+  path: '/ncbi/record/$accession',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const NcbiOrganismTaxIdRoute = NcbiOrganismTaxIdRouteImport.update({
+  id: '/ncbi/organism/$taxId',
+  path: '/ncbi/organism/$taxId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRoute
+  '/quantum-search': typeof QuantumSearchRoute
+  '/quantum-search-results': typeof QuantumSearchResultsRoute
+  '/ncbi/search': typeof NcbiSearchRoute
+  '/ncbi/organism/$taxId': typeof NcbiOrganismTaxIdRoute
+  '/ncbi/record/$accession': typeof NcbiRecordAccessionRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRoute
+  '/quantum-search': typeof QuantumSearchRoute
+  '/quantum-search-results': typeof QuantumSearchResultsRoute
+  '/ncbi/search': typeof NcbiSearchRoute
+  '/ncbi/organism/$taxId': typeof NcbiOrganismTaxIdRoute
+  '/ncbi/record/$accession': typeof NcbiRecordAccessionRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRoute
+  '/quantum-search': typeof QuantumSearchRoute
+  '/quantum-search-results': typeof QuantumSearchResultsRoute
+  '/ncbi/search': typeof NcbiSearchRoute
+  '/ncbi/organism/$taxId': typeof NcbiOrganismTaxIdRoute
+  '/ncbi/record/$accession': typeof NcbiRecordAccessionRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/dashboard'
+  fullPaths:
+    | '/'
+    | '/dashboard'
+    | '/quantum-search'
+    | '/quantum-search-results'
+    | '/ncbi/search'
+    | '/ncbi/organism/$taxId'
+    | '/ncbi/record/$accession'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/dashboard'
-  id: '__root__' | '/' | '/dashboard'
+  to:
+    | '/'
+    | '/dashboard'
+    | '/quantum-search'
+    | '/quantum-search-results'
+    | '/ncbi/search'
+    | '/ncbi/organism/$taxId'
+    | '/ncbi/record/$accession'
+  id:
+    | '__root__'
+    | '/'
+    | '/dashboard'
+    | '/quantum-search'
+    | '/quantum-search-results'
+    | '/ncbi/search'
+    | '/ncbi/organism/$taxId'
+    | '/ncbi/record/$accession'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   DashboardRoute: typeof DashboardRoute
+  QuantumSearchRoute: typeof QuantumSearchRoute
+  QuantumSearchResultsRoute: typeof QuantumSearchResultsRoute
+  NcbiSearchRoute: typeof NcbiSearchRoute
+  NcbiOrganismTaxIdRoute: typeof NcbiOrganismTaxIdRoute
+  NcbiRecordAccessionRoute: typeof NcbiRecordAccessionRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/quantum-search-results': {
+      id: '/quantum-search-results'
+      path: '/quantum-search-results'
+      fullPath: '/quantum-search-results'
+      preLoaderRoute: typeof QuantumSearchResultsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/quantum-search': {
+      id: '/quantum-search'
+      path: '/quantum-search'
+      fullPath: '/quantum-search'
+      preLoaderRoute: typeof QuantumSearchRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/dashboard': {
       id: '/dashboard'
       path: '/dashboard'
@@ -65,12 +151,38 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/ncbi/search': {
+      id: '/ncbi/search'
+      path: '/ncbi/search'
+      fullPath: '/ncbi/search'
+      preLoaderRoute: typeof NcbiSearchRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/ncbi/record/$accession': {
+      id: '/ncbi/record/$accession'
+      path: '/ncbi/record/$accession'
+      fullPath: '/ncbi/record/$accession'
+      preLoaderRoute: typeof NcbiRecordAccessionRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/ncbi/organism/$taxId': {
+      id: '/ncbi/organism/$taxId'
+      path: '/ncbi/organism/$taxId'
+      fullPath: '/ncbi/organism/$taxId'
+      preLoaderRoute: typeof NcbiOrganismTaxIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   DashboardRoute: DashboardRoute,
+  QuantumSearchRoute: QuantumSearchRoute,
+  QuantumSearchResultsRoute: QuantumSearchResultsRoute,
+  NcbiSearchRoute: NcbiSearchRoute,
+  NcbiOrganismTaxIdRoute: NcbiOrganismTaxIdRoute,
+  NcbiRecordAccessionRoute: NcbiRecordAccessionRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

@@ -1,134 +1,116 @@
-# Quantum DNA Alignment Lab
+# Quantum Helix Lab
 
-A futuristic web dashboard demonstrating quantum-accelerated DNA sequence alignment using FRQI encoding and Grover's Search Algorithm. Built for a Quantum Computing & AI Hackathon.
+A React/TanStack Start frontend for quantum-assisted genomic search, NCBI nucleotide record exploration, taxonomy-tree browsing, and DNA sequence analysis workflows.
 
-**Live Demo:** https://quantum-helix-lab.lovable.app
+Live demo:
 
----
-
-## ✨ Features
-
-- Cinematic landing page with a live rotating 3D DNA helix (React Three Fiber)
-- Emerald / glassmorphism aesthetic inspired by Apple, Stripe, Vercel & Linear
-- Full scientific dashboard: alignment viewer, quantum circuit simulator, analytics charts
-- Smooth Framer Motion animations & scroll effects
-- Fully responsive, dark-themed UI powered by Tailwind CSS v4 + shadcn/ui
-
----
-
-## 🧰 Tech Stack
-
-- **Framework:** TanStack Start v1 (React 19 + Vite 7, file-based routing, SSR)
-- **Styling:** Tailwind CSS v4, shadcn/ui, tw-animate-css
-- **3D / Motion:** three.js, @react-three/fiber, @react-three/drei, framer-motion
-- **Data Viz:** Recharts
-- **Language:** TypeScript
-
----
-
-## 📋 Prerequisites
-
-Install these once on your machine:
-
-- **Node.js** ≥ 20 — https://nodejs.org
-- **Bun** ≥ 1.1 (recommended package manager) — https://bun.sh
-  ```bash
-  curl -fsSL https://bun.sh/install | bash
-  ```
-  > `npm` or `pnpm` will also work — just swap the commands below.
-- **Git** — https://git-scm.com
-
----
-
-## 🚀 Getting Started (Localhost)
-
-### 1. Clone the repository
-
-```bash
-git clone <YOUR_REPO_URL>
-cd <YOUR_REPO_FOLDER>
+```text
+https://quantum-helix-lab.lovable.app
 ```
 
-### 2. Install dependencies
+## Features
+
+- Cinematic landing page with a live rotating 3D DNA helix.
+- Quantum bioinformatics dashboard.
+- NCBI Entrez nucleotide search with gene, organism, source, and sequence-length filters.
+- NCBI record details pages with metadata, FASTA display, selective downloads, and sequence-analysis handoff.
+- Genome Data Viewer-style taxonomy panel with selected organism highlighting.
+- Wikimedia/Wikipedia organism image lookup with a no-image fallback.
+- Quantum search workflow pages for FRQI/Grover-backed genomic DNA analysis.
+- Responsive dark UI built with Tailwind CSS and Radix/shadcn-style components.
+
+## Stack
+
+- React 19
+- TypeScript
+- TanStack Start / TanStack Router
+- Vite
+- Tailwind CSS 4
+- Radix UI components
+- React Query
+- Three.js / React Three Fiber
+- Framer Motion
+- Recharts
+
+## Local Setup
+
+Install dependencies:
 
 ```bash
 bun install
 ```
 
-<details>
-<summary>Using npm or pnpm instead</summary>
+Run the frontend on the expected local port:
 
 ```bash
-npm install
-# or
-pnpm install
+bun run dev -- --host 127.0.0.1 --port 8080
 ```
-</details>
 
-### 3. Run the dev server
+The frontend will be available at:
+
+```text
+http://localhost:8080
+```
+
+Build for production:
 
 ```bash
-bun run dev
+bun run build
 ```
 
-The app will start on **http://localhost:8080** (or the next available port). Open it in your browser to see the exact same dashboard as the deployed site.
-
-### 4. Build for production
+Preview a production build:
 
 ```bash
-bun run build      # production build
-bun run preview    # preview the production build locally
+bun run preview
 ```
 
----
+## Backend API
 
-## 📜 Available Scripts
+The NCBI and quantum-search pages call a FastAPI backend. By default the frontend expects:
 
-| Command             | Description                              |
-| ------------------- | ---------------------------------------- |
-| `bun run dev`       | Start the Vite dev server (HMR)          |
-| `bun run build`     | Production build                         |
-| `bun run build:dev` | Development-mode build                   |
-| `bun run preview`   | Preview the production build             |
-| `bun run lint`      | Run ESLint                               |
-| `bun run format`    | Format the codebase with Prettier        |
-
----
-
-## 📁 Project Structure
-
-```
-src/
-├── components/          # Landing, Dashboard, DNAHelix, BackgroundFX, ui/
-├── routes/              # File-based routes (TanStack Router)
-│   ├── __root.tsx       # App shell (html/head/body)
-│   ├── index.tsx        # Landing page  →  /
-│   └── dashboard.tsx    # Dashboard     →  /dashboard
-├── hooks/
-├── lib/
-├── styles.css           # Tailwind v4 theme tokens
-├── router.tsx
-└── server.ts
+```text
+http://localhost:8000
 ```
 
----
+Set this environment variable if the backend runs elsewhere:
 
-## 🧪 Routes
+```bash
+VITE_QUANTUM_API_BASE_URL=http://localhost:8000
+```
 
-- `/` — Cinematic landing page with 3D DNA helix
-- `/dashboard` — Quantum bioinformatics dashboard
+NCBI API configuration belongs on the backend, not in the frontend bundle:
 
----
+```bash
+NCBI_API_KEY=
+NCBI_TOOL_NAME=quantum_dna_search
+NCBI_DEVELOPER_EMAIL=
+```
 
-## 🩺 Troubleshooting
+## Routes
 
-- **Port already in use** → set a different port: `PORT=3000 bun run dev`
-- **Blank page / 3D helix not rendering** → ensure your browser supports WebGL2 (`chrome://gpu`)
-- **Type errors after install** → delete `node_modules` and `bun.lock`, then `bun install` again
-- **Node version mismatch** → run `node -v` and upgrade to Node 20+
+- `/` - Landing page
+- `/dashboard` - Quantum bioinformatics dashboard
+- `/quantum-search` - NCBI genomic DNA quantum search setup
+- `/quantum-search-results` - Search job result viewer
+- `/ncbi/search` - NCBI Entrez gene/nucleotide search with right-side taxonomy tree panel
+- `/ncbi/record/:accession` - NCBI record details, organism image, taxonomy tree, downloads, and analysis handoff
+- `/ncbi/organism/:taxId` - NCBI organism taxonomy details
 
----
+## Git Ignore Notes
 
-## 📄 License
+The repository intentionally ignores local dependencies, generated builds, and runtime logs:
 
-MIT — built with ❤️ for the Quantum Computing & AI Hackathon.
+```text
+node_modules/
+.output/
+.wrangler/
+.tanstack/
+*.log
+```
+
+## Notes
+
+- The frontend does not expose NCBI API keys.
+- Organism images are looked up from free Wikimedia/Wikipedia metadata when available.
+- If no free image is available, the UI shows a no-image state.
+- The Genome Data Viewer panel is dynamic and data-driven; it is not a static image copy.
