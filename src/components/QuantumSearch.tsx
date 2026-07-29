@@ -22,6 +22,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { BackgroundFX } from "@/components/BackgroundFX";
+import { LoadingInsight } from "@/components/LoadingInsight";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -73,6 +74,12 @@ type Estimate = {
   estimatedGroverIterations: number;
   exceedsSimulatorLimits: boolean;
   samplingOrTruncation: boolean;
+  estimateMode: "metadata_only";
+  estimatedSimulationSecondsMin: number;
+  estimatedSimulationSecondsMax: number;
+  estimatedEndToEndSecondsMin: number;
+  estimatedEndToEndSecondsMax: number;
+  runtimeEstimateNote: string;
   warnings: string[];
   quantumAlphabet: "ACGT";
 };
@@ -81,7 +88,26 @@ type SearchResult = {
   jobId: string;
   algorithm: string;
   quantumAlphabet: "ACGT";
-  retrieval: { provider: string; recordCount: number; totalBases: number; retrievedAt: string };
+  query?: { length: number; sequence?: string; sequencePreview: string };
+  reference?: {
+    source: string;
+    scope: string;
+    sequencePreview: string;
+    windowLength: number;
+    accession?: string;
+    coordinates?: string;
+    selectionMethod: string;
+  };
+  retrieval: {
+    provider: string;
+    recordCount: number;
+    totalBases: number;
+    retrievedAt: string;
+    requestedRecords?: number;
+    attemptedRecords?: number;
+    failedRecords?: number;
+    partial?: boolean;
+  };
   pipeline: { retrieval: string; prefilter: string; quantumStage: string; validation: string };
   hits: Array<{
     rank: number;
@@ -98,10 +124,27 @@ type SearchResult = {
     querySequence: string;
     quantumScore: number;
     algorithm: string;
-    classicalValidation?: { matches: boolean; positionsWithinWindow: number[] };
+    classicalValidation?: {
+      matches: boolean;
+      positionsWithinWindow: number[];
+      validatedWindow?: string;
+      validationSource?: string;
+      storedWindowMatchesCoordinate?: boolean;
+      warning?: string;
+    };
     quantumDetails: Record<string, unknown>;
   }>;
-  quantumMetrics: Record<string, unknown>;
+  quantumMetrics?: Record<string, unknown>;
+  windowSelection?: {
+    mode: string;
+    description: string;
+    requestedMaxWindows: number;
+    acceptedWindows: number;
+    processedWindows: number;
+    windowStride: number;
+    strand: string;
+    ranking: string;
+  };
   blastCheck?: BlastCheck;
   warnings: string[];
   truncation: { occurred: boolean; reason: string | null };
@@ -144,6 +187,40 @@ type JobStatusSnapshot = {
   error?: string | null;
 };
 
+type NoiseResultSection = {
+  counts: Record<string, number>;
+  probabilities: Record<string, number>;
+  successProbability: number;
+  falsePositiveProbability: number;
+  topState?: string | null;
+  similarity?: number;
+};
+
+type NoiseComparison = {
+  jobId: string;
+  algorithm: Algorithm;
+  noiseType: string;
+  mitigation: string;
+  shots: number;
+  requestedShots?: number;
+  metricLabel: string;
+  simulator: string;
+  hardwareRun: boolean;
+  noiseModelScope?: string;
+  ideal: NoiseResultSection;
+  noisy: NoiseResultSection;
+  mitigated: NoiseResultSection;
+  circuitMetrics: {
+    originalDepth: number;
+    transpiledDepth: number;
+    originalSize: number;
+    transpiledSize: number;
+    cxCount: number;
+    qubits: number;
+  };
+  noiseParameters: Record<string, unknown>;
+};
+
 type AnalysisImport = {
   accession: string;
   recordTitle: string;
@@ -160,13 +237,32 @@ type AnalysisImport = {
 const executionSteps = [
   {
     label: "Retrieving genomic records",
-    reachedBy: ["retrieving_records", "preprocessing", "estimating_resources", "building_circuit", "simulating", "completed"],
-    completeBy: ["preprocessing", "estimating_resources", "building_circuit", "simulating", "completed"],
+    reachedBy: [
+      "retrieving_records",
+      "preprocessing",
+      "estimating_resources",
+      "building_circuit",
+      "simulating",
+      "completed",
+    ],
+    completeBy: [
+      "preprocessing",
+      "estimating_resources",
+      "building_circuit",
+      "simulating",
+      "completed",
+    ],
     activeBy: ["queued", "retrieving_records"],
   },
   {
     label: "Normalizing sequences",
-    reachedBy: ["preprocessing", "estimating_resources", "building_circuit", "simulating", "completed"],
+    reachedBy: [
+      "preprocessing",
+      "estimating_resources",
+      "building_circuit",
+      "simulating",
+      "completed",
+    ],
     completeBy: ["estimating_resources", "building_circuit", "simulating", "completed"],
     activeBy: ["preprocessing"],
   },
@@ -249,8 +345,9 @@ const algorithmCards = [
   },
   {
     value: "hybrid" as Algorithm,
-    title: "Hybrid Search",
-    detail: "Selectable research field only in this build; execution is not enabled yet.",
+    title: "Hybrid Fixed-Point",
+    detail:
+      "Coherently computes DNA mismatches and applies robust fixed-point amplification without knowing M.",
   },
 ];
 
@@ -260,9 +357,11 @@ export function QuantumSearch() {
     "pasted",
   );
   const [querySequence, setQuerySequence] = useState("ACGT");
+  const [referenceSequence, setReferenceSequence] = useState("");
   const [uploadedFasta, setUploadedFasta] = useState("");
   const [queryAccession, setQueryAccession] = useState("");
-  const [algorithm, setAlgorithm] = useState<Algorithm>("grover");
+  const [algorithm, setAlgorithm] = useState<Algorithm | null>("grover");
+  const [groverBoundarySafe, setGroverBoundarySafe] = useState(true);
   const [scope, setScope] = useState<Scope>("genbank_gca");
   const [organism, setOrganism] = useState("Escherichia coli");
   const [gene, setGene] = useState("");
@@ -297,6 +396,13 @@ export function QuantumSearch() {
   );
   const queryValid = /^[ACGT]*$/.test(sequencePreview) && sequencePreview.length > 0;
   const queryWithinLength = sequencePreview.length <= maxQueryLength;
+  const referencePreview = useMemo(
+    () => referenceSequence.replace(/\s/g, "").toUpperCase(),
+    [referenceSequence],
+  );
+  const referenceValid =
+    scope !== "pasted_sequence" ||
+    (/^[ACGT]+$/.test(referencePreview) && referencePreview.length >= sequencePreview.length);
   const largeScope = maxRecords > 10 || maxWindows > 64;
   const jobStageStatuses = new Set([
     ...(jobStatus?.progress?.map((entry) => entry.status) ?? []),
@@ -326,6 +432,7 @@ export function QuantumSearch() {
   }, [
     querySource,
     querySequence,
+    referenceSequence,
     uploadedFasta,
     queryAccession,
     algorithm,
@@ -341,19 +448,21 @@ export function QuantumSearch() {
     maxQueryLength,
     stride,
     strand,
+    groverBoundarySafe,
   ]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const accession = params.get("analysisAccession");
     if (!accession) return;
+    const analysisAccession = accession;
     let ignore = false;
     async function loadAnalysisImport() {
       setAnalysisLoading(true);
       setAnalysisError("");
       try {
         const response = await fetch(
-          `${API_BASE}/api/ncbi/entrez/records/${encodeURIComponent(accession)}/analysis`,
+          `${API_BASE}/api/ncbi/entrez/records/${encodeURIComponent(analysisAccession)}/analysis`,
         );
         const body = await response.json().catch(() => ({ detail: response.statusText }));
         if (!response.ok) throw new Error(String(body.detail || response.statusText));
@@ -421,7 +530,8 @@ export function QuantumSearch() {
     if (!/^[ACGT]+$/.test(selectedRegion)) {
       setLimitDialog({
         title: "Unsupported bases in selected region",
-        message: "The selected region contains bases outside A, T, G and C. Choose one of the detected ATGC-only regions before analysis.",
+        message:
+          "The selected region contains bases outside A, T, G and C. Choose one of the detected ATGC-only regions before analysis.",
       });
       return;
     }
@@ -436,6 +546,7 @@ export function QuantumSearch() {
   const requestPayload = () => ({
     querySource,
     querySequence: querySource === "pasted" ? querySequence : null,
+    referenceSequence: scope === "pasted_sequence" ? referenceSequence : null,
     uploadedFasta:
       querySource === "uploaded_fasta"
         ? uploadedFasta
@@ -444,6 +555,7 @@ export function QuantumSearch() {
           : null,
     queryAccession: querySource === "ncbi_accession" ? queryAccession : null,
     algorithm,
+    groverBoundaryMode: groverBoundarySafe ? "boundary_safe" : "paper_cyclic",
     databaseScope: scope,
     organism: organism || null,
     gene: gene || null,
@@ -485,8 +597,23 @@ export function QuantumSearch() {
   }
 
   async function handleEstimate() {
+    if (!algorithm) {
+      setLimitDialog({
+        title: "Algorithm required",
+        message: "Select FRQI, Grover, or Hybrid before running an estimate.",
+      });
+      return;
+    }
     if (!queryWithinLength) {
       showQueryLengthDialog();
+      return;
+    }
+    if (!referenceValid) {
+      setLimitDialog({
+        title: "Reference sequence required",
+        message:
+          "Enter an A/C/G/T reference sequence at least as long as the active query before estimating.",
+      });
       return;
     }
     setBusy(true);
@@ -505,14 +632,30 @@ export function QuantumSearch() {
   }
 
   async function handleRun() {
+    if (!algorithm) {
+      setLimitDialog({
+        title: "Algorithm required",
+        message: "Select FRQI, Grover, or Hybrid before starting execution.",
+      });
+      return;
+    }
     if (!queryWithinLength) {
       showQueryLengthDialog();
+      return;
+    }
+    if (!referenceValid) {
+      setLimitDialog({
+        title: "Reference sequence required",
+        message:
+          "Enter an A/C/G/T reference sequence at least as long as the active query before starting execution.",
+      });
       return;
     }
     if (!estimate) {
       setLimitDialog({
         title: "New estimate required",
-        message: "Search settings changed after the last estimate. Run Estimate again before starting execution.",
+        message:
+          "Search settings changed after the last estimate. Run Estimate again before starting execution.",
       });
       setStatus("Run a new estimate before execution");
       return;
@@ -541,7 +684,9 @@ export function QuantumSearch() {
       try {
         jobResponse = await fetch(`${API_BASE}/api/quantum-search/jobs/${jobId}`);
       } catch {
-        throw new Error(`Cannot poll quantum search job ${jobId}; the API at ${API_BASE} is unreachable.`);
+        throw new Error(
+          `Cannot poll quantum search job ${jobId}; the API at ${API_BASE} is unreachable.`,
+        );
       }
       const jobBody = await jobResponse.json().catch(() => ({ detail: jobResponse.statusText }));
       if (!jobResponse.ok) {
@@ -552,9 +697,13 @@ export function QuantumSearch() {
       setStatus(job.progress?.at(-1)?.message || job.status);
       if (job.status === "completed") {
         const resultResponse = await fetch(`${API_BASE}/api/quantum-search/jobs/${jobId}/results`);
-        const resultBody = await resultResponse.json().catch(() => ({ detail: resultResponse.statusText }));
+        const resultBody = await resultResponse
+          .json()
+          .catch(() => ({ detail: resultResponse.statusText }));
         if (!resultResponse.ok) {
-          throw new Error(formatApiError(resultBody, `Could not fetch quantum search results for ${jobId}`));
+          throw new Error(
+            formatApiError(resultBody, `Could not fetch quantum search results for ${jobId}`),
+          );
         }
         setResult(resultBody as SearchResult);
         setJobStatus({ ...job, progressPercent: 100, estimatedRemainingSeconds: 0 });
@@ -588,16 +737,6 @@ export function QuantumSearch() {
       setValidatingCandidates(false);
     }
   }
-
-  const probabilityData = useMemo(() => {
-    const first = result?.hits?.[0]?.quantumDetails;
-    const probs = first?.indexProbabilities || first?.counts;
-    if (!probs) return [];
-    return Object.entries(probs).map(([index, probability]) => ({
-      index,
-      probability: Number(probability),
-    }));
-  }, [result]);
 
   return (
     <div className="relative min-h-screen">
@@ -638,9 +777,9 @@ export function QuantumSearch() {
           className="flex flex-wrap items-end justify-between gap-4"
         >
           <div>
-            <div className="text-xs uppercase tracking-widest text-emerald">
+            {/* <div className="text-xs uppercase tracking-widest text-emerald">
               Nucleotide sequence search
-            </div>
+            </div> */}
             <h1 className="mt-1 font-display text-3xl font-semibold tracking-tight">
               NCBI genomic DNA quantum search
             </h1>
@@ -652,7 +791,7 @@ export function QuantumSearch() {
           <div className="flex flex-wrap gap-2">
             <Button
               onClick={handleEstimate}
-              disabled={busy || !queryValid || algorithm === "hybrid"}
+              disabled={busy || !queryValid || !referenceValid || !algorithm}
               variant="outline"
               className="rounded-full border-white/10 bg-white/5"
             >
@@ -660,9 +799,7 @@ export function QuantumSearch() {
             </Button>
             <Button
               onClick={handleRun}
-              disabled={
-                busy || !estimate || estimate.exceedsSimulatorLimits || algorithm === "hybrid"
-              }
+              disabled={busy || !estimate || estimate.exceedsSimulatorLimits || !algorithm}
               className="rounded-full bg-emerald text-primary-foreground glow-emerald"
             >
               {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}{" "}
@@ -671,14 +808,16 @@ export function QuantumSearch() {
           </div>
         </motion.div>
 
-        {(largeScope || algorithm === "hybrid") && (
+        {(largeScope || algorithm === "hybrid" || !algorithm) && (
           <div className="glass rounded-2xl p-4 text-sm text-muted-foreground">
             <div className="flex gap-3">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-yellow-400" />
               <span>
-                {algorithm === "hybrid"
-                  ? "Hybrid is available as a user field only in this build; run FRQI or Grover for execution."
-                  : "Large database searches use staged retrieval and bounded quantum processing. The entire GenBank database is not loaded into the quantum circuit."}
+                {!algorithm
+                  ? "Select FRQI, Grover, or Hybrid before estimating. Double-clicking a selected method clears it."
+                  : algorithm === "hybrid"
+                    ? "Hybrid uses an in-circuit XOR mismatch predicate and an unknown-M fixed-point schedule. Inputs are compiled into bounded lookup gates; free QRAM is not assumed."
+                    : "Large database searches use staged retrieval and bounded quantum processing. The entire GenBank database is not loaded into the quantum circuit."}
               </span>
             </div>
           </div>
@@ -688,7 +827,8 @@ export function QuantumSearch() {
           <Panel title="NCBI Sequence Analysis" eyebrow="Imported accession" icon={Dna}>
             {analysisLoading && (
               <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-muted-foreground">
-                <Loader2 className="mr-2 inline h-4 w-4 animate-spin text-emerald" /> Fetching nucleotide sequence from NCBI
+                <Loader2 className="mr-2 inline h-4 w-4 animate-spin text-emerald" /> Fetching
+                nucleotide sequence from NCBI
               </div>
             )}
             {analysisError && (
@@ -728,7 +868,10 @@ export function QuantumSearch() {
                     className="theme-select rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm"
                   >
                     {analysisImport.atgcRegions.map((region) => (
-                      <option key={`${region.start}-${region.end}`} value={`${region.start}-${region.end}`}>
+                      <option
+                        key={`${region.start}-${region.end}`}
+                        value={`${region.start}-${region.end}`}
+                      >
                         ATGC region {region.start}-{region.end} ({region.length} bp)
                       </option>
                     ))}
@@ -749,12 +892,16 @@ export function QuantumSearch() {
                     onChange={(event) => setRegionEnd(Number(event.target.value))}
                     className="border-white/10 bg-black/30"
                   />
-                  <Button onClick={applyAnalysisRegion} className="rounded-full bg-emerald text-primary-foreground">
+                  <Button
+                    onClick={applyAnalysisRegion}
+                    className="rounded-full bg-emerald text-primary-foreground"
+                  >
                     Apply Region
                   </Button>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Choose FRQI comparison or Grover sequence search below, then run an estimate before execution.
+                  Choose FRQI comparison or Grover sequence search below, then run an estimate
+                  before execution.
                 </p>
               </div>
             )}
@@ -762,9 +909,10 @@ export function QuantumSearch() {
         )}
 
         <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
-          <Panel title="Query DNA Sequence" eyebrow="What to search for" icon={Upload}>
+          <Panel title="Query DNA Sequence" eyebrow="Sequence input" icon={Upload}>
             <p className="mb-3 text-xs text-muted-foreground">
-              Query is the DNA sequence you want to find. Reference/Search Set below is where the portal searches for it.
+              Query is the DNA sequence you want to find. Reference/Search Set below is where the
+              portal searches for it.
             </p>
             <div className="mb-3 grid gap-2 sm:grid-cols-3">
               {(["pasted", "uploaded_fasta", "ncbi_accession"] as const).map((item) => (
@@ -810,12 +958,12 @@ export function QuantumSearch() {
                 ) : (
                   <XCircle className="mr-1 inline h-3.5 w-3.5" />
                 )}
-                {sequencePreview.length} bases � ACGT only
+                {sequencePreview.length} bases - ACGT only
               </div>
             </div>
           </Panel>
 
-          <Panel title="Reference / Search Set" eyebrow="Where to search" icon={Database}>
+          <Panel title="Reference Set" eyebrow="Where to search" icon={Database}>
             <select
               value={scope}
               onChange={(event) => setScope(event.target.value as Scope)}
@@ -830,6 +978,28 @@ export function QuantumSearch() {
             <p className="mt-2 text-xs text-muted-foreground">
               {scopes.find((item) => item.value === scope)?.detail}
             </p>
+            {scope === "pasted_sequence" && (
+              <div className="mt-4">
+                <label className="text-xs font-medium text-foreground">
+                  Reference DNA Sequence
+                </label>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Paste the target DNA in which the query should be searched.
+                </p>
+                <Textarea
+                  value={referenceSequence}
+                  onChange={(event) => setReferenceSequence(event.target.value)}
+                  placeholder="TTACGTACGTGG"
+                  className="mt-2 h-32 resize-none border-white/10 bg-black/30 font-mono text-xs"
+                />
+                <div className={`mt-2 text-xs ${referenceValid ? "text-emerald" : "text-red-400"}`}>
+                  {referencePreview.length} bases —{" "}
+                  {referenceValid
+                    ? "valid ACGT reference"
+                    : "must be ACGT and at least query length"}
+                </div>
+              </div>
+            )}
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
               <Input
                 value={gene}
@@ -870,20 +1040,75 @@ export function QuantumSearch() {
             <button
               key={item.value}
               onClick={() => setAlgorithm(item.value)}
-              className={`glass rounded-2xl p-5 text-left transition hover:-translate-y-0.5 ${
-                algorithm === item.value ? "border-emerald/50 bg-emerald/10" : ""
+              onDoubleClick={() => {
+                if (algorithm === item.value) setAlgorithm(null);
+              }}
+              className={`rounded-2xl border-2 p-5 text-left transition hover:-translate-y-0.5 ${
+                algorithm === item.value
+                  ? "border-emerald bg-emerald/15 shadow-[0_0_0_2px_rgba(16,185,129,0.35),0_18px_45px_-25px_rgba(16,185,129,0.65)]"
+                  : "border-white/10 bg-white/5 hover:border-emerald/40"
               }`}
             >
-              <Cpu className="mb-3 h-5 w-5 text-emerald" />
-              <div className="font-display text-lg font-semibold">{item.title}</div>
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <Cpu className="h-5 w-5 text-emerald" />
+                {algorithm === item.value && (
+                  <span className="rounded-full border border-emerald/40 bg-emerald px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-background">
+                    Selected
+                  </span>
+                )}
+              </div>
+              <div
+                className={
+                  algorithm === item.value
+                    ? "font-display text-lg font-semibold text-emerald"
+                    : "font-display text-lg font-semibold"
+                }
+              >
+                {item.title}
+              </div>
               <p className="mt-2 text-sm text-muted-foreground">{item.detail}</p>
             </button>
           ))}
         </div>
 
         <div className="grid gap-4 lg:grid-cols-3">
-          <Panel title="Search Configuration" eyebrow={algorithm} icon={FlaskConical}>
+          <Panel
+            title="Search Configuration"
+            eyebrow={algorithm || "No algorithm selected"}
+            icon={FlaskConical}
+          >
             <div className="grid gap-3">
+              {algorithm === "grover" && (
+                <div className="rounded-xl border-2 border-emerald bg-emerald/10 p-4 text-sm shadow-[0_0_0_1px_rgba(16,185,129,0.25)]">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <div className="text-[10px] uppercase tracking-wider text-emerald">
+                        Grover boundary mode
+                      </div>
+                      <div className="mt-1 font-display text-base font-semibold">
+                        {groverBoundarySafe
+                          ? "Boundary-safe mode ON"
+                          : "Paper 2-bit cyclic mode ON"}
+                      </div>
+                    </div>
+                    <label className="inline-flex cursor-pointer items-center gap-3 rounded-full border border-emerald/40 bg-black/25 px-3 py-2">
+                      <input
+                        type="checkbox"
+                        checked={groverBoundarySafe}
+                        onChange={(event) => setGroverBoundarySafe(event.target.checked)}
+                        className="h-4 w-4 accent-emerald"
+                      />
+                      <span className="font-mono text-xs text-emerald">
+                        {groverBoundarySafe ? "ON" : "OFF"}
+                      </span>
+                    </label>
+                  </div>
+                  <p className="mt-3 text-xs text-muted-foreground">
+                    ON uses terminator-safe padded windows. OFF uses the paper-style 2-bit cyclic
+                    model.
+                  </p>
+                </div>
+              )}
               <LabelledNumber
                 label="Shots"
                 value={shots}
@@ -943,15 +1168,28 @@ export function QuantumSearch() {
             {estimate ? (
               <>
                 <div className="grid grid-cols-2 gap-3 text-sm">
-                  <Metric label="Records" value={estimate.recordCount} />
-                  <Metric label="Bases" value={estimate.totalBases} />
-                  <Metric label="Windows" value={estimate.acceptedWindows} />
-                  <Metric label="Skipped" value={estimate.skippedWindows} />
+                  <Metric label="Record cap" value={estimate.recordCount} />
+                  <Metric label="Base cap" value={estimate.totalBases.toLocaleString()} />
+                  <Metric label="Maximum runs" value={estimate.estimatedQuantumRuns} />
+                  <Metric label="Maximum shots" value={estimate.estimatedShots.toLocaleString()} />
                   <Metric label="Qubits" value={estimate.estimatedLogicalQubits} />
-                  <Metric label="Shots" value={estimate.estimatedShots} />
                   <Metric label="Grover iter." value={estimate.estimatedGroverIterations} />
-                  <Metric label="Alphabet" value={estimate.quantumAlphabet} />
+                  <Metric
+                    label="Simulation time"
+                    value={formatEstimateRange(
+                      estimate.estimatedSimulationSecondsMin,
+                      estimate.estimatedSimulationSecondsMax,
+                    )}
+                  />
+                  <Metric
+                    label="Expected total time"
+                    value={formatEstimateRange(
+                      estimate.estimatedEndToEndSecondsMin,
+                      estimate.estimatedEndToEndSecondsMax,
+                    )}
+                  />
                 </div>
+                <p className="mt-3 text-xs text-muted-foreground">{estimate.runtimeEstimateNote}</p>
                 {estimate.exceedsSimulatorLimits && (
                   <div className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-300">
                     This request exceeds local simulator limits. Reduce the query/window length or
@@ -974,9 +1212,7 @@ export function QuantumSearch() {
               {executionSteps.map((step) => {
                 const complete = step.completeBy.some((status) => jobStageStatuses.has(status));
                 const active =
-                  busy &&
-                  !result &&
-                  step.activeBy.some((status) => jobStageStatuses.has(status));
+                  busy && !result && step.activeBy.some((status) => jobStageStatuses.has(status));
                 return (
                   <div key={step.label} className="flex items-center gap-2 text-sm">
                     {active ? (
@@ -989,7 +1225,7 @@ export function QuantumSearch() {
                     <span className={active ? "text-foreground" : "text-muted-foreground"}>
                       {step.label}
                     </span>
-                </div>
+                  </div>
                 );
               })}
               <div className="rounded-lg bg-black/30 p-3 text-xs text-muted-foreground">
@@ -1039,7 +1275,10 @@ export function QuantumSearch() {
               <DialogDescription>{limitDialog?.message}</DialogDescription>
             </DialogHeader>
             <DialogFooter>
-              <Button onClick={() => setLimitDialog(null)} className="bg-emerald text-primary-foreground">
+              <Button
+                onClick={() => setLimitDialog(null)}
+                className="bg-emerald text-primary-foreground"
+              >
                 OK
               </Button>
             </DialogFooter>
@@ -1058,16 +1297,82 @@ export function QuantumSearchResultsPage({ jobId }: { jobId: string }) {
   const [validatingCandidates, setValidatingCandidates] = useState(false);
   const [blastLoading, setBlastLoading] = useState(false);
   const [blastMaxRecords, setBlastMaxRecords] = useState(25);
+  const [noiseResult, setNoiseResult] = useState<NoiseComparison | null>(null);
+  const [noiseLoading, setNoiseLoading] = useState(false);
+  const [noiseSingleQubitError, setNoiseSingleQubitError] = useState(0.002);
+  const [noiseTwoQubitError, setNoiseTwoQubitError] = useState(0.01);
+  const [readoutZeroToOne, setReadoutZeroToOne] = useState(0.03);
+  const [readoutOneToZero, setReadoutOneToZero] = useState(0.04);
 
-  const probabilityData = useMemo(() => {
+  const distributionChart = useMemo(() => {
     const first = result?.hits?.[0]?.quantumDetails;
-    const probs = first?.indexProbabilities || first?.counts;
-    if (!probs) return [];
-    return Object.entries(probs).map(([index, probability]) => ({
-      index,
-      probability: Number(probability),
-    }));
+    const counts = asRecord(first?.counts);
+    const probabilities = asRecord(first?.indexProbabilities);
+    const values = counts || probabilities;
+    if (!values) {
+      return {
+        data: [] as Array<{ index: string; value: number }>,
+        title: "Quantum measurement distribution",
+        xLabel: "Measured index / candidate state",
+        yLabel: "Shots or probability",
+      };
+    }
+    return {
+      data: Object.entries(values).map(([index, value]) => ({
+        index,
+        value: Number(value),
+      })),
+      title: counts ? "Quantum measurement counts" : "Quantum index probabilities",
+      xLabel: counts ? "Measured state bitstring" : "Candidate index",
+      yLabel: counts ? "Shot count" : "Probability",
+    };
   }, [result]);
+
+  const scoreChartData = useMemo(
+    () =>
+      (result?.hits ?? []).map((hit) => ({
+        label: `${hit.rank}`,
+        score: Number(hit.quantumScore || 0),
+      })),
+    [result],
+  );
+
+  const validationChartData = useMemo(() => {
+    const hits = result?.hits ?? [];
+    return [
+      { label: "Exact", count: hits.filter((hit) => hit.classicalValidation?.matches).length },
+      {
+        label: "No exact",
+        count: hits.filter((hit) => hit.classicalValidation && !hit.classicalValidation.matches)
+          .length,
+      },
+      { label: "Pending", count: hits.filter((hit) => !hit.classicalValidation).length },
+    ];
+  }, [result]);
+
+  const timingChartData = useMemo(() => {
+    if (!result) return [];
+    const metrics = result.quantumMetrics ?? {};
+    const quantumSeconds = numberMetric(metrics.quantumExecutionSeconds);
+    const validationSeconds = numberMetric(metrics.classicalValidationSeconds);
+    if (quantumSeconds == null && validationSeconds == null) return [];
+    return [
+      { label: "Quantum", seconds: quantumSeconds ?? 0 },
+      { label: "Classical validation", seconds: validationSeconds ?? 0 },
+    ];
+  }, [result]);
+
+  const noiseChartData = useMemo(
+    () =>
+      noiseResult
+        ? [
+            { label: "Ideal", probability: noiseResult.ideal.successProbability },
+            { label: "Noisy", probability: noiseResult.noisy.successProbability },
+            { label: "Mitigated", probability: noiseResult.mitigated.successProbability },
+          ]
+        : [],
+    [noiseResult],
+  );
 
   const organismGroups = useMemo(() => {
     if (!result) return [];
@@ -1086,26 +1391,28 @@ export function QuantumSearchResultsPage({ jobId }: { jobId: string }) {
       const organism = hit.organism || "Unknown organism";
       const taxId = hit.taxId || "";
       const key = taxId || organism;
-      const group =
-        groups.get(key) ||
-        {
-          organism,
-          taxId,
-          records: new Set<string>(),
-          hitCount: 0,
-          exactMatches: 0,
-          sourceDatabases: new Set<string>(),
-        };
+      const group = groups.get(key) || {
+        organism,
+        taxId,
+        records: new Set<string>(),
+        hitCount: 0,
+        exactMatches: 0,
+        sourceDatabases: new Set<string>(),
+      };
       group.records.add(hit.accession);
       group.hitCount += 1;
       if (hit.classicalValidation?.matches) group.exactMatches += 1;
       if (hit.sourceDatabase) group.sourceDatabases.add(hit.sourceDatabase);
       groups.set(key, group);
     });
-    return Array.from(groups.values()).sort((a, b) => b.exactMatches - a.exactMatches || b.hitCount - a.hitCount);
+    return Array.from(groups.values()).sort(
+      (a, b) => b.exactMatches - a.exactMatches || b.hitCount - a.hitCount,
+    );
   }, [result]);
 
   useEffect(() => {
+    setNoiseResult(null);
+    setNoiseLoading(false);
     if (!jobId) return;
     let ignore = false;
 
@@ -1116,7 +1423,9 @@ export function QuantumSearchResultsPage({ jobId }: { jobId: string }) {
         try {
           jobResponse = await fetch(`${API_BASE}/api/quantum-search/jobs/${jobId}`);
         } catch {
-          throw new Error(`Cannot poll quantum search job ${jobId}; the API at ${API_BASE} is unreachable.`);
+          throw new Error(
+            `Cannot poll quantum search job ${jobId}; the API at ${API_BASE} is unreachable.`,
+          );
         }
         const jobBody = await jobResponse.json().catch(() => ({ detail: jobResponse.statusText }));
         if (!jobResponse.ok) {
@@ -1127,13 +1436,30 @@ export function QuantumSearchResultsPage({ jobId }: { jobId: string }) {
         setJobStatus(job);
         setStatus(job.progress?.at(-1)?.message || job.status);
         if (job.status === "completed") {
-          const resultResponse = await fetch(`${API_BASE}/api/quantum-search/jobs/${jobId}/results`);
-          const resultBody = await resultResponse.json().catch(() => ({ detail: resultResponse.statusText }));
+          const resultResponse = await fetch(
+            `${API_BASE}/api/quantum-search/jobs/${jobId}/results`,
+          );
+          const resultBody = await resultResponse
+            .json()
+            .catch(() => ({ detail: resultResponse.statusText }));
           if (!resultResponse.ok) {
-            throw new Error(formatApiError(resultBody, `Could not fetch quantum search results for ${jobId}`));
+            throw new Error(
+              formatApiError(resultBody, `Could not fetch quantum search results for ${jobId}`),
+            );
           }
           if (ignore) return;
-          setResult(resultBody as SearchResult);
+          const completedResult = resultBody as SearchResult;
+          setResult(completedResult);
+          if (completedResult.algorithm === "grover") {
+            setNoiseSingleQubitError(0.001);
+            setNoiseTwoQubitError(0.015);
+          } else if (completedResult.algorithm === "frqi") {
+            setNoiseSingleQubitError(0.002);
+            setNoiseTwoQubitError(0.01);
+          } else {
+            setReadoutZeroToOne(0.03);
+            setReadoutOneToZero(0.04);
+          }
           setJobStatus({ ...job, progressPercent: 100, estimatedRemainingSeconds: 0 });
           setStatus("Results ready");
           return;
@@ -1154,6 +1480,36 @@ export function QuantumSearchResultsPage({ jobId }: { jobId: string }) {
       ignore = true;
     };
   }, [jobId]);
+
+  async function handleAddNoise() {
+    if (!result?.jobId) return;
+    setNoiseLoading(true);
+    setError("");
+    try {
+      const parameters =
+        result.algorithm === "hybrid"
+          ? {
+              readoutZeroToOne,
+              readoutOneToZero,
+            }
+          : {
+              singleQubitError: noiseSingleQubitError,
+              twoQubitError: noiseTwoQubitError,
+            };
+      const response = await fetch(`${API_BASE}/api/quantum-search/jobs/${result.jobId}/noise`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(parameters),
+      });
+      const body = await response.json().catch(() => ({ detail: response.statusText }));
+      if (!response.ok) throw new Error(formatApiError(body, "Noisy simulation failed"));
+      setNoiseResult(body as NoiseComparison);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Noisy simulation failed");
+    } finally {
+      setNoiseLoading(false);
+    }
+  }
 
   async function handleValidateCandidates() {
     if (!result?.jobId) return;
@@ -1196,6 +1552,7 @@ export function QuantumSearchResultsPage({ jobId }: { jobId: string }) {
   return (
     <div className="relative min-h-screen">
       <BackgroundFX />
+      {jobId && !result && !error && <LoadingInsight title={status || "Running quantum search"} />}
       <header className="sticky top-0 z-30 border-b border-white/5 bg-background/60 backdrop-blur-xl">
         <div className="mx-auto flex max-w-[1400px] items-center justify-between px-6 py-4">
           <Link
@@ -1227,17 +1584,134 @@ export function QuantumSearchResultsPage({ jobId }: { jobId: string }) {
             <EmptyState text="No search job was provided. Run a quantum search first." />
           ) : result ? (
             <div className="space-y-5">
-              <div className="grid gap-3 sm:grid-cols-4">
+              <div className="grid gap-3 sm:grid-cols-6">
                 <Metric label="Algorithm" value={result.algorithm} />
                 <Metric label="Provider" value={result.retrieval.provider} />
                 <Metric label="Hits" value={result.hits.length} />
-                <Metric label="Alphabet" value={result.quantumAlphabet} />
+                <Metric
+                  label="Reference source"
+                  value={result.reference?.source || result.retrieval.provider}
+                />
+                <SequenceMetric
+                  label="Query sequence"
+                  value={
+                    result.query?.sequence ||
+                    result.hits[0]?.querySequence ||
+                    result.query?.sequencePreview ||
+                    ""
+                  }
+                />
+              </div>
+              {result.reference && (
+                <div className="rounded-xl border border-emerald/20 bg-emerald/10 p-4">
+                  <div className="grid gap-4 md:grid-cols-[0.45fr_1fr]">
+                    <div>
+                      <div className="text-xs uppercase tracking-widest text-emerald">
+                        Reference preview
+                      </div>
+                      <div className="mt-2 font-mono text-lg text-foreground">
+                        {result.reference.sequencePreview || "-"}
+                      </div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        First 10 bases of the top processed reference window
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-xs uppercase tracking-widest text-emerald">
+                        How the reference was taken
+                      </div>
+                      <p className="mt-2 text-sm text-muted-foreground">
+                        {result.reference.selectionMethod}
+                      </p>
+                      <p className="mt-2 font-mono text-xs text-emerald">
+                        {result.reference.source}
+                        {result.reference.accession ? ` • ${result.reference.accession}` : ""}
+                        {result.reference.coordinates
+                          ? ` • positions ${result.reference.coordinates}`
+                          : ""}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+              <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="text-xs uppercase tracking-widest text-emerald">
+                      Noise configuration
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Probabilities must stay between 0 and 0.5. Changing a value clears the
+                      previous comparison.
+                    </p>
+                  </div>
+                  <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1 font-mono text-xs text-muted-foreground">
+                    {result.algorithm}
+                  </span>
+                </div>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  {result.algorithm === "hybrid" ? (
+                    <>
+                      <NoiseParameterInput
+                        label="Readout 0 → 1 error"
+                        value={readoutZeroToOne}
+                        onChange={(value) => {
+                          setReadoutZeroToOne(value);
+                          setNoiseResult(null);
+                        }}
+                      />
+                      <NoiseParameterInput
+                        label="Readout 1 → 0 error"
+                        value={readoutOneToZero}
+                        onChange={(value) => {
+                          setReadoutOneToZero(value);
+                          setNoiseResult(null);
+                        }}
+                      />
+                    </>
+                  ) : (
+                    <>
+                      <NoiseParameterInput
+                        label="Single-qubit error"
+                        value={noiseSingleQubitError}
+                        onChange={(value) => {
+                          setNoiseSingleQubitError(value);
+                          setNoiseResult(null);
+                        }}
+                      />
+                      <NoiseParameterInput
+                        label="Two-qubit error"
+                        value={noiseTwoQubitError}
+                        onChange={(value) => {
+                          setNoiseTwoQubitError(value);
+                          setNoiseResult(null);
+                        }}
+                      />
+                    </>
+                  )}
+                </div>
               </div>
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/5 p-3 text-sm">
                 <div className="text-xs text-muted-foreground">
-                  Job {jobId} {jobStatus?.elapsedSeconds != null ? `- elapsed ${formatDuration(jobStatus.elapsedSeconds)}` : ""}
+                  Job {jobId}{" "}
+                  {jobStatus?.elapsedSeconds != null
+                    ? `- elapsed ${formatDuration(jobStatus.elapsedSeconds)}`
+                    : ""}
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    onClick={handleAddNoise}
+                    disabled={noiseLoading || result.hits.length === 0}
+                    variant="outline"
+                    className="rounded-full border-emerald/30 bg-emerald/10 text-emerald hover:bg-emerald/20"
+                  >
+                    {noiseLoading ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <FlaskConical className="h-4 w-4" />
+                    )}
+                    {noiseLoading ? "Running noisy simulation..." : "Add Noise"}
+                  </Button>
                   <label className="flex items-center gap-2 text-xs text-muted-foreground">
                     BLAST records
                     <Input
@@ -1245,7 +1719,11 @@ export function QuantumSearchResultsPage({ jobId }: { jobId: string }) {
                       min={1}
                       max={100}
                       value={blastMaxRecords}
-                      onChange={(event) => setBlastMaxRecords(Math.min(100, Math.max(1, Number(event.target.value) || 25)))}
+                      onChange={(event) =>
+                        setBlastMaxRecords(
+                          Math.min(100, Math.max(1, Number(event.target.value) || 25)),
+                        )
+                      }
                       className="h-9 w-20 border-white/10 bg-black/30"
                     />
                   </label>
@@ -1255,7 +1733,11 @@ export function QuantumSearchResultsPage({ jobId }: { jobId: string }) {
                     variant="outline"
                     className="rounded-full border-white/10 bg-white/5"
                   >
-                    {blastLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                    {blastLoading ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Search className="h-4 w-4" />
+                    )}
                     BLAST Truth Check
                   </Button>
                   <Button
@@ -1273,23 +1755,47 @@ export function QuantumSearchResultsPage({ jobId }: { jobId: string }) {
                   </Button>
                 </div>
               </div>
+              {result.warnings.length > 0 && (
+                <div className="rounded-xl border border-yellow-400/20 bg-yellow-400/10 p-4">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-yellow-100">
+                    <AlertTriangle className="h-4 w-4" />
+                    Search completed with warnings
+                  </div>
+                  <ul className="mt-2 space-y-1 text-xs text-yellow-100/90">
+                    {result.warnings.map((warning, index) => (
+                      <li key={`${index}-${warning}`}>• {warning}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               {organismGroups.length > 0 && (
                 <div className="space-y-3">
                   <div>
-                    <div className="text-xs uppercase tracking-widest text-emerald">Organisms from processed records</div>
-                    <h2 className="mt-1 font-display text-lg font-semibold">Relevant organisms containing returned windows</h2>
+                    <div className="text-xs uppercase tracking-widest text-emerald">
+                      Organisms from processed records
+                    </div>
+                    <h2 className="mt-1 font-display text-lg font-semibold">
+                      Relevant organisms containing returned windows
+                    </h2>
                   </div>
                   <div className="grid gap-3 lg:grid-cols-2">
                     {organismGroups.map((group) => (
-                      <div key={`${group.taxId}-${group.organism}`} className="rounded-xl border border-white/10 bg-white/5 p-4">
+                      <div
+                        key={`${group.taxId}-${group.organism}`}
+                        className="rounded-xl border border-white/10 bg-white/5 p-4"
+                      >
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <div>
-                            <h3 className="font-display text-base font-semibold">{group.organism}</h3>
+                            <h3 className="font-display text-base font-semibold">
+                              {group.organism}
+                            </h3>
                             <p className="mt-1 text-xs text-muted-foreground">
-                              {group.records.size} records - {group.hitCount} windows - {group.exactMatches} exact matches
+                              {group.records.size} records - {group.hitCount} windows -{" "}
+                              {group.exactMatches} exact matches
                             </p>
                             <p className="mt-1 text-xs text-muted-foreground">
-                              {Array.from(group.sourceDatabases).join(", ") || "Source not specified"}
+                              {Array.from(group.sourceDatabases).join(", ") ||
+                                "Source not specified"}
                             </p>
                           </div>
                           {group.taxId ? (
@@ -1312,11 +1818,17 @@ export function QuantumSearchResultsPage({ jobId }: { jobId: string }) {
                 <div className="rounded-xl border border-emerald/20 bg-emerald/10 p-4">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                      <div className="text-xs uppercase tracking-widest text-emerald">BLAST truth check</div>
-                      <h2 className="mt-1 font-display text-lg font-semibold">GenBank genomic BLAST comparison</h2>
+                      <div className="text-xs uppercase tracking-widest text-emerald">
+                        BLAST truth check
+                      </div>
+                      <h2 className="mt-1 font-display text-lg font-semibold">
+                        GenBank genomic BLAST comparison
+                      </h2>
                       <p className="mt-2 text-sm text-muted-foreground">
-                        {result.blastCheck.records.length} BLAST records across {result.blastCheck.organisms.length} organisms.
-                        {result.blastCheck.matchingQuantumAccessions.length} quantum accessions also appeared in BLAST results.
+                        {result.blastCheck.records.length} BLAST records across{" "}
+                        {result.blastCheck.organisms.length} organisms.
+                        {result.blastCheck.matchingQuantumAccessions.length} quantum accessions also
+                        appeared in BLAST results.
                       </p>
                       <p className="mt-1 text-xs text-muted-foreground">
                         Entrez filter: {result.blastCheck.entrezQuery}
@@ -1329,15 +1841,35 @@ export function QuantumSearchResultsPage({ jobId }: { jobId: string }) {
                   {result.blastCheck.organisms.length > 0 && (
                     <div className="mt-4 grid gap-3 lg:grid-cols-2">
                       {result.blastCheck.organisms.slice(0, 8).map((organism) => (
-                        <div key={organism.organismName} className="rounded-lg border border-white/10 bg-black/20 p-3">
-                          <div className="font-display text-sm font-semibold">{organism.organismName}</div>
+                        <div
+                          key={organism.organismName}
+                          className="rounded-lg border border-white/10 bg-black/20 p-3"
+                        >
+                          <div className="font-display text-sm font-semibold">
+                            {organism.organismName}
+                          </div>
                           <div className="mt-1 text-xs text-muted-foreground">
-                            {organism.recordCount} records - best identity {organism.bestPercentIdentity}%
+                            {organism.recordCount} records - best identity{" "}
+                            {organism.bestPercentIdentity}%
                           </div>
                         </div>
                       ))}
                     </div>
                   )}
+                </div>
+              )}
+              {result.windowSelection && (
+                <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm">
+                  <div className="text-xs uppercase tracking-widest text-emerald">
+                    Window selection
+                  </div>
+                  <p className="mt-2 text-muted-foreground">{result.windowSelection.description}</p>
+                  <p className="mt-2 font-mono text-xs text-emerald">
+                    processed {result.windowSelection.processedWindows} / accepted{" "}
+                    {result.windowSelection.acceptedWindows} windows; stride{" "}
+                    {result.windowSelection.windowStride}; strand {result.windowSelection.strand};
+                    ranking {result.windowSelection.ranking}
+                  </p>
                 </div>
               )}
               <div className="overflow-x-auto rounded-xl border border-white/10">
@@ -1355,14 +1887,19 @@ export function QuantumSearchResultsPage({ jobId }: { jobId: string }) {
                   </thead>
                   <tbody>
                     {result.hits.map((hit) => (
-                      <tr key={`${hit.rank}-${hit.accession}-${hit.start}`} className="border-t border-white/5">
+                      <tr
+                        key={`${hit.rank}-${hit.accession}-${hit.start}`}
+                        className="border-t border-white/5"
+                      >
                         <td className="px-3 py-3 font-mono text-emerald">{hit.rank}</td>
                         <td className="px-3 py-3">{hit.accession}</td>
                         <td className="px-3 py-3">{hit.strand}</td>
                         <td className="px-3 py-3 font-mono">
                           {hit.start}-{hit.end}
                         </td>
-                        <td className="px-3 py-3 font-mono">{Number(hit.quantumScore).toFixed(4)}</td>
+                        <td className="px-3 py-3 font-mono">
+                          {Number(hit.quantumScore).toFixed(4)}
+                        </td>
                         <td className="px-3 py-3">
                           {hit.classicalValidation
                             ? hit.classicalValidation.matches
@@ -1378,13 +1915,95 @@ export function QuantumSearchResultsPage({ jobId }: { jobId: string }) {
                   </tbody>
                 </table>
               </div>
-              {probabilityData.length > 0 && (
-                <div className="h-64 rounded-xl bg-black/30 p-4">
+              {distributionChart.data.length > 0 && (
+                <div className="rounded-xl border border-white/10 bg-black/30 p-4">
+                  <div className="flex flex-wrap items-end justify-between gap-3">
+                    <div>
+                      <div className="text-xs uppercase tracking-widest text-emerald">
+                        Quantum distribution
+                      </div>
+                      <h2 className="mt-1 font-display text-lg font-semibold">
+                        {distributionChart.title}
+                      </h2>
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      X: {distributionChart.xLabel} | Y: {distributionChart.yLabel}
+                    </div>
+                  </div>
+                  <div className="mt-3 h-72">
+                    <ResponsiveContainer>
+                      <BarChart
+                        data={distributionChart.data}
+                        margin={{ top: 12, right: 20, bottom: 38, left: 12 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+                        <XAxis
+                          dataKey="index"
+                          tick={{ fill: "#94a3b8", fontSize: 11 }}
+                          label={{
+                            value: distributionChart.xLabel,
+                            position: "insideBottom",
+                            offset: -24,
+                            fill: "#94a3b8",
+                            fontSize: 11,
+                          }}
+                        />
+                        <YAxis
+                          tick={{ fill: "#94a3b8", fontSize: 11 }}
+                          label={{
+                            value: distributionChart.yLabel,
+                            angle: -90,
+                            position: "insideLeft",
+                            fill: "#94a3b8",
+                            fontSize: 11,
+                          }}
+                        />
+                        <Tooltip
+                          contentStyle={{
+                            background: "#0b1a15",
+                            border: "1px solid rgba(16,185,129,0.3)",
+                            borderRadius: 12,
+                            fontSize: 12,
+                          }}
+                        />
+                        <Bar dataKey="value" fill="#10B981" radius={[6, 6, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              )}
+              <div className="grid gap-4 lg:grid-cols-3">
+                <VisualizationCard
+                  title="Quantum score ranking"
+                  description="Compares every returned window by quantum score after bounded window processing."
+                >
                   <ResponsiveContainer>
-                    <BarChart data={probabilityData}>
+                    <BarChart
+                      data={scoreChartData}
+                      margin={{ top: 8, right: 12, bottom: 28, left: 0 }}
+                    >
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-                      <XAxis dataKey="index" tick={{ fill: "#94a3b8", fontSize: 11 }} />
-                      <YAxis tick={{ fill: "#94a3b8", fontSize: 11 }} />
+                      <XAxis
+                        dataKey="label"
+                        tick={{ fill: "#94a3b8", fontSize: 10 }}
+                        label={{
+                          value: "Hit rank",
+                          position: "insideBottom",
+                          offset: -18,
+                          fill: "#94a3b8",
+                          fontSize: 10,
+                        }}
+                      />
+                      <YAxis
+                        tick={{ fill: "#94a3b8", fontSize: 10 }}
+                        label={{
+                          value: "Quantum score",
+                          angle: -90,
+                          position: "insideLeft",
+                          fill: "#94a3b8",
+                          fontSize: 10,
+                        }}
+                      />
                       <Tooltip
                         contentStyle={{
                           background: "#0b1a15",
@@ -1393,11 +2012,105 @@ export function QuantumSearchResultsPage({ jobId }: { jobId: string }) {
                           fontSize: 12,
                         }}
                       />
-                      <Bar dataKey="probability" fill="#10B981" radius={[6, 6, 0, 0]} />
+                      <Bar dataKey="score" fill="#22d3ee" radius={[4, 4, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
-                </div>
-              )}
+                </VisualizationCard>
+                <VisualizationCard
+                  title="Validation breakdown"
+                  description="Shows how many returned windows became exact matches after classical validation."
+                >
+                  <ResponsiveContainer>
+                    <BarChart
+                      data={validationChartData}
+                      margin={{ top: 8, right: 12, bottom: 28, left: 0 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+                      <XAxis
+                        dataKey="label"
+                        tick={{ fill: "#94a3b8", fontSize: 10 }}
+                        label={{
+                          value: "Validation state",
+                          position: "insideBottom",
+                          offset: -18,
+                          fill: "#94a3b8",
+                          fontSize: 10,
+                        }}
+                      />
+                      <YAxis
+                        allowDecimals={false}
+                        tick={{ fill: "#94a3b8", fontSize: 10 }}
+                        label={{
+                          value: "Window count",
+                          angle: -90,
+                          position: "insideLeft",
+                          fill: "#94a3b8",
+                          fontSize: 10,
+                        }}
+                      />
+                      <Tooltip
+                        contentStyle={{
+                          background: "#0b1a15",
+                          border: "1px solid rgba(16,185,129,0.3)",
+                          borderRadius: 12,
+                          fontSize: 12,
+                        }}
+                      />
+                      <Bar dataKey="count" fill="#10B981" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </VisualizationCard>
+                <VisualizationCard
+                  title="Execution time comparison"
+                  description="Appears after candidate validation and compares quantum simulation time with classical validation time."
+                >
+                  {timingChartData.length > 0 ? (
+                    <ResponsiveContainer>
+                      <BarChart
+                        data={timingChartData}
+                        margin={{ top: 8, right: 12, bottom: 28, left: 0 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+                        <XAxis
+                          dataKey="label"
+                          tick={{ fill: "#94a3b8", fontSize: 10 }}
+                          label={{
+                            value: "Execution stage",
+                            position: "insideBottom",
+                            offset: -18,
+                            fill: "#94a3b8",
+                            fontSize: 10,
+                          }}
+                        />
+                        <YAxis
+                          tick={{ fill: "#94a3b8", fontSize: 10 }}
+                          label={{
+                            value: "Seconds",
+                            angle: -90,
+                            position: "insideLeft",
+                            fill: "#94a3b8",
+                            fontSize: 10,
+                          }}
+                        />
+                        <Tooltip
+                          formatter={(value) => [`${Number(value).toFixed(4)} s`, "Time"]}
+                          contentStyle={{
+                            background: "#0b1a15",
+                            border: "1px solid rgba(16,185,129,0.3)",
+                            borderRadius: 12,
+                            fontSize: 12,
+                          }}
+                        />
+                        <Bar dataKey="seconds" fill="#fbbf24" radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="flex h-full items-center justify-center px-4 text-center text-xs text-muted-foreground">
+                      Click Validate Candidates to record classical validation time.
+                    </div>
+                  )}
+                </VisualizationCard>
+              </div>
               <div className="flex flex-wrap gap-2">
                 <DownloadButton
                   label="JSON"
@@ -1420,7 +2133,12 @@ export function QuantumSearchResultsPage({ jobId }: { jobId: string }) {
               </div>
             </div>
           ) : (
-            <EmptyState text={status || "Completed searches will show ranked quantum hits, real probabilities, circuit metrics, and downloads."} />
+            <EmptyState
+              text={
+                status ||
+                "Completed searches will show ranked quantum hits, real probabilities, circuit metrics, and downloads."
+              }
+            />
           )}
         </Panel>
 
@@ -1440,6 +2158,118 @@ export function QuantumSearchResultsPage({ jobId }: { jobId: string }) {
             </p>
           </div>
         </Panel>
+
+        {noiseResult && (
+          <Panel
+            title="Ideal vs Noisy vs Mitigated"
+            eyebrow="On-demand Aer noise simulation"
+            icon={Cpu}
+          >
+            <div className="space-y-5">
+              <p className="text-sm text-muted-foreground">
+                This comparison uses Qiskit Aer simulation for the top-ranked window. It is not a
+                quantum hardware run and it does not replace the original ideal result.
+              </p>
+              {noiseResult.noiseModelScope && (
+                <div className="rounded-lg border border-amber-400/30 bg-amber-400/10 p-3 text-xs text-amber-100">
+                  {noiseResult.noiseModelScope}
+                </div>
+              )}
+              <div className="grid gap-3 md:grid-cols-3">
+                {[
+                  ["Ideal", noiseResult.ideal],
+                  ["Noisy", noiseResult.noisy],
+                  ["Mitigated", noiseResult.mitigated],
+                ].map(([label, section]) => {
+                  const values = section as NoiseResultSection;
+                  return (
+                    <div
+                      key={label as string}
+                      className="rounded-xl border border-white/10 bg-white/5 p-4"
+                    >
+                      <div className="text-xs uppercase tracking-widest text-emerald">
+                        {label as string}
+                      </div>
+                      <div className="mt-3 grid gap-2">
+                        <NoiseMetric
+                          label={noiseResult.metricLabel}
+                          value={formatProbability(values.successProbability)}
+                        />
+                        <NoiseMetric
+                          label="False-positive probability"
+                          value={formatProbability(values.falsePositiveProbability)}
+                        />
+                        <NoiseMetric label="Top measured state" value={values.topState || "-"} />
+                        {values.similarity != null && (
+                          <NoiseMetric
+                            label="FRQI similarity"
+                            value={values.similarity.toFixed(4)}
+                          />
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="grid gap-4 lg:grid-cols-[1.3fr_1fr]">
+                <div className="h-80 rounded-xl border border-white/10 bg-black/30 p-4">
+                  <div className="text-xs uppercase tracking-widest text-emerald">
+                    Probability comparison
+                  </div>
+                  <div className="mt-3 h-64">
+                    <ResponsiveContainer>
+                      <BarChart data={noiseChartData}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+                        <XAxis dataKey="label" tick={{ fill: "#94a3b8", fontSize: 11 }} />
+                        <YAxis domain={[0, 1]} tick={{ fill: "#94a3b8", fontSize: 11 }} />
+                        <Tooltip
+                          formatter={(value) => formatProbability(Number(value))}
+                          contentStyle={{
+                            background: "#0b1a15",
+                            border: "1px solid rgba(16,185,129,0.3)",
+                            borderRadius: 12,
+                            fontSize: 12,
+                          }}
+                        />
+                        <Bar dataKey="probability" fill="#10B981" radius={[6, 6, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+                <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+                  <div className="text-xs uppercase tracking-widest text-emerald">
+                    Simulation details
+                  </div>
+                  <div className="mt-3 grid gap-2">
+                    <NoiseMetric label="Noise type" value={noiseResult.noiseType} />
+                    <NoiseMetric label="Mitigation" value={noiseResult.mitigation} />
+                    <NoiseMetric
+                      label="Circuit depth"
+                      value={`${noiseResult.circuitMetrics.originalDepth} → ${noiseResult.circuitMetrics.transpiledDepth}`}
+                    />
+                    <NoiseMetric
+                      label="Two-qubit gate count"
+                      value={String(noiseResult.circuitMetrics.cxCount)}
+                    />
+                    <NoiseMetric
+                      label="Shots"
+                      value={
+                        noiseResult.requestedShots &&
+                        noiseResult.requestedShots !== noiseResult.shots
+                          ? `${noiseResult.shots} executed (${noiseResult.requestedShots} requested)`
+                          : String(noiseResult.shots)
+                      }
+                    />
+                    <NoiseMetric
+                      label="Noise parameters"
+                      value={JSON.stringify(noiseResult.noiseParameters)}
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </Panel>
+        )}
       </main>
     </div>
   );
@@ -1472,6 +2302,27 @@ function Panel({
       </div>
       {children}
     </motion.section>
+  );
+}
+
+function VisualizationCard({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="h-80 rounded-xl border border-white/10 bg-black/30 p-4">
+      <div>
+        <div className="text-xs uppercase tracking-widest text-emerald">Visualization</div>
+        <h3 className="mt-1 font-display text-base font-semibold">{title}</h3>
+        <p className="mt-1 min-h-10 text-xs text-muted-foreground">{description}</p>
+      </div>
+      <div className="mt-3 h-52">{children}</div>
+    </div>
   );
 }
 
@@ -1548,11 +2399,78 @@ function Metric({ label, value }: { label: string; value: string | number }) {
   );
 }
 
+function NoiseMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-2">
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className="mt-1 break-words font-mono text-xs text-foreground">{value}</div>
+    </div>
+  );
+}
+
+function NoiseParameterInput({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <label className="grid gap-1 text-xs text-muted-foreground">
+      {label}
+      <Input
+        type="number"
+        min={0}
+        max={0.5}
+        step={0.001}
+        value={value}
+        onChange={(event) => {
+          const parsed = Number(event.target.value);
+          if (!Number.isFinite(parsed)) return;
+          onChange(Math.min(0.5, Math.max(0, parsed)));
+        }}
+        className="border-white/10 bg-black/30 font-mono text-foreground"
+      />
+    </label>
+  );
+}
+
+function formatProbability(value: number) {
+  return `${(Math.min(1, Math.max(0, value)) * 100).toFixed(2)}%`;
+}
+
+function numberMetric(value: unknown): number | null {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function SequenceMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl border border-white/10 bg-white/5 p-3 sm:col-span-2">
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className="mt-1 max-h-16 overflow-auto break-all font-mono text-sm text-emerald">
+        {value || "-"}
+      </div>
+    </div>
+  );
+}
+
 function formatDuration(seconds: number) {
   if (seconds < 60) return `${seconds}s`;
   const minutes = Math.floor(seconds / 60);
   const remainingSeconds = seconds % 60;
   return remainingSeconds ? `${minutes}m ${remainingSeconds}s` : `${minutes}m`;
+}
+
+function formatEstimateRange(minimumSeconds: number, maximumSeconds: number) {
+  return `${formatDuration(minimumSeconds)}–${formatDuration(maximumSeconds)}`;
 }
 
 function EmptyState({ text }: { text: string }) {

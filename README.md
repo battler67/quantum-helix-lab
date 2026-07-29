@@ -1,116 +1,153 @@
 # Quantum Helix Lab
 
-A React/TanStack Start frontend for quantum-assisted genomic search, NCBI nucleotide record exploration, taxonomy-tree browsing, and DNA sequence analysis workflows.
+Quantum Helix Lab is a full-stack genomic DNA portal with a React/TanStack frontend,
+a FastAPI backend, bounded NCBI genomic retrieval, and local Qiskit Aer implementations
+of FRQI similarity, QGSA/Grover exact-pattern search, and hybrid fixed-point search.
 
-Live demo:
+The repository intentionally contains source code and tests, not local environments,
+downloaded dependencies, credentials, build folders, or generated experiment outputs.
 
-```text
-https://quantum-helix-lab.lovable.app
-```
-
-## Features
-
-- Cinematic landing page with a live rotating 3D DNA helix.
-- Quantum bioinformatics dashboard.
-- NCBI Entrez nucleotide search with gene, organism, source, and sequence-length filters.
-- NCBI record details pages with metadata, FASTA display, selective downloads, and sequence-analysis handoff.
-- Genome Data Viewer-style taxonomy panel with selected organism highlighting.
-- Wikimedia/Wikipedia organism image lookup with a no-image fallback.
-- Quantum search workflow pages for FRQI/Grover-backed genomic DNA analysis.
-- Responsive dark UI built with Tailwind CSS and Radix/shadcn-style components.
-
-## Stack
-
-- React 19
-- TypeScript
-- TanStack Start / TanStack Router
-- Vite
-- Tailwind CSS 4
-- Radix UI components
-- React Query
-- Three.js / React Three Fiber
-- Framer Motion
-- Recharts
-
-## Local Setup
-
-Install dependencies:
-
-```bash
-bun install
-```
-
-Run the frontend on the expected local port:
-
-```bash
-bun run dev -- --host 127.0.0.1 --port 8080
-```
-
-The frontend will be available at:
+## Repository layout
 
 ```text
-http://localhost:8080
+.
+|-- src/                    React/TanStack frontend
+|-- public/                 Frontend assets
+|-- quantum_search_api/     FastAPI application and portal search orchestration
+|-- qgsa_grover/            QGSA/Grover exact-pattern circuit package
+|-- frqi_dna/               FRQI DNA comparison package
+|-- quantum_dna/            Standalone and hybrid quantum experiments
+|-- docs/                   Implementation documentation
+|-- specs/                  Change specifications and verification records
+`-- scripts/                Windows setup and startup helpers
 ```
 
-Build for production:
+## Prerequisites
 
-```bash
+- Git
+- Python 3.13
+- Bun 1.3
+- Internet access for the initial dependency installation and NCBI-backed searches
+
+The portal uses local Qiskit Aer simulation. IBM hardware submission is not part of
+the web workflow.
+
+## Windows quick start
+
+Clone the private repository and enter it:
+
+```powershell
+git clone https://github.com/battler67/quantum-helix-lab.git
+cd quantum-helix-lab
+```
+
+Install Python and frontend dependencies:
+
+```powershell
+.\scripts\setup.ps1
+```
+
+Open `quantum_search_api\.env` and replace the placeholder email. Add your own NCBI
+API key if available:
+
+```env
+NCBI_API_KEY=your_ncbi_api_key
+NCBI_TOOL_NAME=quantum_helix_lab
+NCBI_DEVELOPER_EMAIL=your_email@example.com
+```
+
+Start the backend in terminal 1:
+
+```powershell
+.\scripts\start-backend.ps1
+```
+
+Start the frontend in terminal 2:
+
+```powershell
+.\scripts\start-frontend.ps1
+```
+
+Open:
+
+```text
+http://127.0.0.1:8080
+```
+
+The backend health endpoint is:
+
+```text
+http://127.0.0.1:8000/api/health
+```
+
+## Manual setup
+
+From the repository root:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+bun install --frozen-lockfile
+Copy-Item .env.example .env.local
+Copy-Item quantum_search_api\.env.example quantum_search_api\.env
+```
+
+The root `requirements.txt` installs the backend dependencies and the local
+`qgsa_grover` package in editable mode.
+
+## Verification
+
+Backend:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest quantum_search_api\tests -q --disable-warnings
+```
+
+Frontend:
+
+```powershell
+bunx eslint src/components/QuantumSearch.tsx
 bun run build
 ```
 
-Preview a production build:
+Optional standalone suites:
 
-```bash
-bun run preview
+```powershell
+.\.venv\Scripts\python.exe -m pytest frqi_dna\tests -q --disable-warnings
+.\.venv\Scripts\python.exe -m pytest qgsa_grover\tests -q --disable-warnings
+.\.venv\Scripts\python.exe -m pytest quantum_dna\tests -q --disable-warnings
 ```
 
-## Backend API
+## Functionality
 
-The NCBI and quantum-search pages call a FastAPI backend. By default the frontend expects:
+- Landing page and quantum bioinformatics dashboard
+- NCBI Entrez genomic record search and record details
+- Taxonomy and organism views
+- Pasted, uploaded FASTA, accession, assembly, organism, and taxonomy search inputs
+- Metadata-only resource estimation
+- Bounded reference retrieval with partial-result handling
+- Forward and reverse-complement reference windows
+- FRQI similarity, Grover exact matching, and hybrid fixed-point processing
+- On-demand configurable noise comparisons
+- Optional classical candidate validation and BLAST checks
 
-```text
-http://localhost:8000
-```
+NCBI content and response times depend on the external NCBI services. Quantum circuit
+size is deliberately bounded for local simulation.
 
-Set this environment variable if the backend runs elsewhere:
+## Configuration and security
 
-```bash
-VITE_QUANTUM_API_BASE_URL=http://localhost:8000
-```
+- Never commit `.env`, `.env.local`, tokens, API keys, or personal credentials.
+- `VITE_*` variables are visible in the browser and must never contain secrets.
+- Each collaborator should use their own NCBI contact email and API key.
+- Generated experiment artifacts are written under package `outputs/` directories,
+  which are ignored by Git.
 
-NCBI API configuration belongs on the backend, not in the frontend bundle:
+## Development notes
 
-```bash
-NCBI_API_KEY=
-NCBI_TOOL_NAME=quantum_dna_search
-NCBI_DEVELOPER_EMAIL=
-```
-
-## Routes
-
-- `/` - Landing page
-- `/dashboard` - Quantum bioinformatics dashboard
-- `/quantum-search` - NCBI genomic DNA quantum search setup
-- `/quantum-search-results` - Search job result viewer
-- `/ncbi/search` - NCBI Entrez gene/nucleotide search with right-side taxonomy tree panel
-- `/ncbi/record/:accession` - NCBI record details, organism image, taxonomy tree, downloads, and analysis handoff
-- `/ncbi/organism/:taxId` - NCBI organism taxonomy details
-
-## Git Ignore Notes
-
-The repository intentionally ignores local dependencies, generated builds, and runtime logs:
-
-```text
-node_modules/
-.output/
-.wrangler/
-.tanstack/
-*.log
-```
-
-## Notes
-
-- The frontend does not expose NCBI API keys.
-- Organism images are looked up from free Wikimedia/Wikipedia metadata when available.
-- If no free image is available, the UI shows a no-image state.
-- The Genome Data Viewer panel is dynamic and data-driven; it is not a static image copy.
+- Run backend commands from the repository root so sibling packages resolve correctly.
+- The frontend defaults to `http://127.0.0.1:8000` for the API.
+- Search jobs are currently stored in backend memory; restarting FastAPI clears them.
+- Optional IBM Runtime helpers exist under `quantum_dna`, but real hardware submission
+  requires separate credentials, dependencies, and explicit confirmation.

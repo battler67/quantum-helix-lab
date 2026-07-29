@@ -21,8 +21,18 @@ function HelixStrand({ mouse }: { mouse: React.MutableRefObject<{ x: number; y: 
       const y = (i - count / 2) * 0.35;
       const angle = t * Math.PI * 8;
       const r = 1.2;
-      arr.push({ pos: new THREE.Vector3(Math.cos(angle) * r, y, Math.sin(angle) * r), base: bases[i % 4], side: 1, t });
-      arr.push({ pos: new THREE.Vector3(Math.cos(angle + Math.PI) * r, y, Math.sin(angle + Math.PI) * r), base: bases[(i + 2) % 4], side: -1, t });
+      arr.push({
+        pos: new THREE.Vector3(Math.cos(angle) * r, y, Math.sin(angle) * r),
+        base: bases[i % 4],
+        side: 1,
+        t,
+      });
+      arr.push({
+        pos: new THREE.Vector3(Math.cos(angle + Math.PI) * r, y, Math.sin(angle + Math.PI) * r),
+        base: bases[(i + 2) % 4],
+        side: -1,
+        t,
+      });
     }
     return arr;
   }, []);
@@ -52,29 +62,44 @@ function HelixStrand({ mouse }: { mouse: React.MutableRefObject<{ x: number; y: 
 
   return (
     <group ref={group}>
-     <group ref={inner}>
-      {nucleotides.map((n, i) => (
-        <mesh key={i} position={n.pos}>
-          <sphereGeometry args={[0.18, 24, 24]} />
-          <meshStandardMaterial color={BASE_COLORS[n.base]} emissive={BASE_COLORS[n.base]} emissiveIntensity={0.9} roughness={0.25} metalness={0.4} />
-        </mesh>
-      ))}
-      {rungs.map((r, i) => {
-        const mid = r.a.clone().add(r.b).multiplyScalar(0.5);
-        const dir = r.b.clone().sub(r.a);
-        const len = dir.length();
-        const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize());
-        return (
-          <mesh key={`r${i}`} position={mid} quaternion={quat}>
-            <cylinderGeometry args={[0.04, 0.04, len, 8]} />
-            <meshStandardMaterial color="#10B981" emissive="#10B981" emissiveIntensity={0.6} transparent opacity={0.6} />
+      <group ref={inner}>
+        {nucleotides.map((n, i) => (
+          <mesh key={i} position={n.pos}>
+            <sphereGeometry args={[0.18, 24, 24]} />
+            <meshStandardMaterial
+              color={BASE_COLORS[n.base]}
+              emissive={BASE_COLORS[n.base]}
+              emissiveIntensity={0.9}
+              roughness={0.25}
+              metalness={0.4}
+            />
           </mesh>
-        );
-      })}
-      {/* backbone tubes */}
-      <BackboneTube offset={0} />
-      <BackboneTube offset={Math.PI} />
-     </group>
+        ))}
+        {rungs.map((r, i) => {
+          const mid = r.a.clone().add(r.b).multiplyScalar(0.5);
+          const dir = r.b.clone().sub(r.a);
+          const len = dir.length();
+          const quat = new THREE.Quaternion().setFromUnitVectors(
+            new THREE.Vector3(0, 1, 0),
+            dir.clone().normalize(),
+          );
+          return (
+            <mesh key={`r${i}`} position={mid} quaternion={quat}>
+              <cylinderGeometry args={[0.04, 0.04, len, 8]} />
+              <meshStandardMaterial
+                color="#10B981"
+                emissive="#10B981"
+                emissiveIntensity={0.6}
+                transparent
+                opacity={0.6}
+              />
+            </mesh>
+          );
+        })}
+        {/* backbone tubes */}
+        <BackboneTube offset={0} />
+        <BackboneTube offset={Math.PI} />
+      </group>
     </group>
   );
 }
@@ -93,7 +118,13 @@ function BackboneTube({ offset }: { offset: number }) {
   return (
     <mesh>
       <tubeGeometry args={[curve, 300, 0.06, 12, false]} />
-      <meshStandardMaterial color="#34d399" emissive="#10B981" emissiveIntensity={0.9} roughness={0.2} metalness={0.6} />
+      <meshStandardMaterial
+        color="#34d399"
+        emissive="#10B981"
+        emissiveIntensity={0.9}
+        roughness={0.2}
+        metalness={0.6}
+      />
     </mesh>
   );
 }
@@ -109,18 +140,29 @@ function Particles() {
       positions[i * 3 + 1] = (Math.random() - 0.5) * 20;
       positions[i * 3 + 2] = (Math.random() - 0.5) * 20;
       const c = new THREE.Color(Math.random() > 0.5 ? "#10B981" : "#38bdf8");
-      colors[i * 3] = c.r; colors[i * 3 + 1] = c.g; colors[i * 3 + 2] = c.b;
+      colors[i * 3] = c.r;
+      colors[i * 3 + 1] = c.g;
+      colors[i * 3 + 2] = c.b;
     }
     return { positions, colors };
   }, []);
-  useFrame((_, d) => { if (ref.current) ref.current.rotation.y += d * 0.02; });
+  useFrame((_, d) => {
+    if (ref.current) ref.current.rotation.y += d * 0.02;
+  });
   return (
     <points ref={ref}>
       <bufferGeometry>
         <bufferAttribute attach="attributes-position" args={[positions, 3]} />
         <bufferAttribute attach="attributes-color" args={[colors, 3]} />
       </bufferGeometry>
-      <pointsMaterial size={0.06} vertexColors transparent opacity={0.8} sizeAttenuation depthWrite={false} />
+      <pointsMaterial
+        size={0.06}
+        vertexColors
+        transparent
+        opacity={0.8}
+        sizeAttenuation
+        depthWrite={false}
+      />
     </points>
   );
 }
@@ -136,7 +178,11 @@ export function DNAHelix({ className = "" }: { className?: string }) {
         mouse.current.y = ((e.clientY - rect.top) / rect.height) * 2 - 1;
       }}
     >
-      <Canvas camera={{ position: [0, 0, 8], fov: 45 }} dpr={[1, 2]} gl={{ antialias: true, alpha: true }}>
+      <Canvas
+        camera={{ position: [0, 0, 8], fov: 45 }}
+        dpr={[1, 2]}
+        gl={{ antialias: true, alpha: true }}
+      >
         <Suspense fallback={null}>
           <color attach="background" args={["#000000"]} />
           <fog attach="fog" args={["#04120c", 8, 22]} />

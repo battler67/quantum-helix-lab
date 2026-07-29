@@ -10,7 +10,8 @@ export const Route = createFileRoute("/quantum-search-results")({
       { title: "Quantum Search Results - QDNA" },
       {
         name: "description",
-        content: "Quantum genomic search results, validation, downloads, and scientific boundaries.",
+        content:
+          "Quantum genomic search results, validation, downloads, and scientific boundaries.",
       },
     ],
   }),
