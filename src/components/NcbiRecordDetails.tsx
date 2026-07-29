@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { BackgroundFX } from "@/components/BackgroundFX";
+import { LoadingInsight } from "@/components/LoadingInsight";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -113,7 +114,9 @@ export function NcbiRecordDetails({ accession }: { accession: string }) {
       setLoading(true);
       setError("");
       try {
-        const response = await fetch(`${API_BASE}/api/ncbi/entrez/records/${encodeURIComponent(accession)}`);
+        const response = await fetch(
+          `${API_BASE}/api/ncbi/entrez/records/${encodeURIComponent(accession)}`,
+        );
         const body = await response.json().catch(() => ({ detail: response.statusText }));
         if (!response.ok) throw new Error(String(body.detail || response.statusText));
         if (!ignore) setRecord(body);
@@ -136,15 +139,19 @@ export function NcbiRecordDetails({ accession }: { accession: string }) {
       setGenomeViewerError("");
       return;
     }
+    const selectedTaxId = taxId;
     let ignore = false;
     async function loadGenomeViewer() {
       setGenomeViewerLoading(true);
       setGenomeViewerError("");
       try {
-        const body = await fetchGenomeViewerContext(API_BASE, taxId);
+        const body = await fetchGenomeViewerContext(API_BASE, selectedTaxId);
         if (!ignore) setGenomeViewer(body);
       } catch (err) {
-        if (!ignore) setGenomeViewerError(err instanceof Error ? err.message : "Could not load genome viewer context");
+        if (!ignore)
+          setGenomeViewerError(
+            err instanceof Error ? err.message : "Could not load genome viewer context",
+          );
       } finally {
         if (!ignore) setGenomeViewerLoading(false);
       }
@@ -155,7 +162,10 @@ export function NcbiRecordDetails({ accession }: { accession: string }) {
     };
   }, [record?.organism.taxId]);
 
-  const selectedData = useMemo(() => (record ? buildSelectedData(record, selected) : {}), [record, selected]);
+  const selectedData = useMemo(
+    () => (record ? buildSelectedData(record, selected) : {}),
+    [record, selected],
+  );
   const filename = record ? buildFilename(record, format) : `NCBI_${accession}.${format}`;
   const downloadData = record ? buildDownloadData(record, selectedData, format) : "";
   const canAnalyze = record ? isDnaRecord(record.overview.moleculeType) : false;
@@ -165,7 +175,10 @@ export function NcbiRecordDetails({ accession }: { accession: string }) {
       <BackgroundFX />
       <header className="sticky top-0 z-30 border-b border-white/5 bg-background/60 backdrop-blur-xl">
         <div className="mx-auto flex max-w-[1400px] items-center justify-between px-6 py-4">
-          <Link to="/ncbi/search" className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
+          <Link
+            to="/ncbi/search"
+            className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
+          >
             <ArrowLeft className="h-4 w-4" /> Search results
           </Link>
           <div className="flex items-center gap-2">
@@ -175,7 +188,12 @@ export function NcbiRecordDetails({ accession }: { accession: string }) {
             <span className="font-display text-lg font-semibold">NCBI Record</span>
           </div>
           {record ? (
-            <a href={record.overview.ncbiUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+            <a
+              href={record.overview.ncbiUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+            >
               NCBI <ExternalLink className="h-3.5 w-3.5" />
             </a>
           ) : (
@@ -186,9 +204,13 @@ export function NcbiRecordDetails({ accession }: { accession: string }) {
 
       <main className="mx-auto max-w-[1400px] space-y-6 p-6 lg:p-8">
         {loading && (
-          <div className="glass rounded-2xl p-6 text-sm text-muted-foreground">
-            <Loader2 className="mr-2 inline h-4 w-4 animate-spin text-emerald" /> Loading complete NCBI record
-          </div>
+          <>
+            <LoadingInsight title={`Loading NCBI record ${accession}`} />
+            <div className="glass rounded-2xl p-6 text-sm text-muted-foreground" role="status">
+              <Loader2 className="mr-2 inline h-4 w-4 animate-spin text-emerald" /> Loading complete
+              NCBI record
+            </div>
+          </>
         )}
         {error && (
           <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-300">
@@ -197,16 +219,31 @@ export function NcbiRecordDetails({ accession }: { accession: string }) {
         )}
         {record && (
           <>
-            <motion.div variants={fadeUp} initial="hidden" animate="show" className="flex min-w-0 flex-wrap items-start justify-between gap-4">
+            <motion.div
+              variants={fadeUp}
+              initial="hidden"
+              animate="show"
+              className="flex min-w-0 flex-wrap items-start justify-between gap-4"
+            >
               <div className="min-w-0 flex-1">
-                <div className="text-xs uppercase tracking-widest text-emerald">{record.overview.accession}</div>
-                <h1 className="mt-1 max-w-5xl break-words font-display text-3xl font-semibold tracking-tight">{record.overview.recordTitle}</h1>
+                <div className="text-xs uppercase tracking-widest text-emerald">
+                  {record.overview.accession}
+                </div>
+                <h1 className="mt-1 max-w-5xl break-words font-display text-3xl font-semibold tracking-tight">
+                  {record.overview.recordTitle}
+                </h1>
                 <p className="mt-2 text-sm text-muted-foreground">
-                  {record.organism.organismName} · {record.overview.source} · {record.overview.sequenceLength.toLocaleString()} bp
+                  {record.organism.organismName} - {record.overview.source} -{" "}
+                  {record.overview.sequenceLength.toLocaleString()} bp
                 </p>
               </div>
               {canAnalyze ? (
-                <a href={`/quantum-search?analysisAccession=${encodeURIComponent(record.overview.accession)}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-full bg-emerald px-4 py-2 text-sm font-semibold text-primary-foreground glow-emerald">
+                <a
+                  href={`/quantum-search?analysisAccession=${encodeURIComponent(record.overview.accession)}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-2 rounded-full bg-emerald px-4 py-2 text-sm font-semibold text-primary-foreground glow-emerald"
+                >
                   <FlaskConical className="h-4 w-4" /> Sequence Analysis
                 </a>
               ) : (
@@ -240,40 +277,69 @@ export function NcbiRecordDetails({ accession }: { accession: string }) {
                     ]}
                   />
                   <CollapsibleSection title="Taxonomy lineage">
-                    <p className="text-sm text-muted-foreground">{record.organism.taxonomy || "No taxonomy lineage returned."}</p>
+                    <p className="text-sm text-muted-foreground">
+                      {record.organism.taxonomy || "No taxonomy lineage returned."}
+                    </p>
                   </CollapsibleSection>
                 </Panel>
 
                 <Panel title="Gene Information" eyebrow="Annotated feature" icon={FileJson}>
-                  <JsonBlock data={record.gene} empty="No gene feature was returned in the GenBank record." />
+                  <JsonBlock
+                    data={record.gene}
+                    empty="No gene feature was returned in the GenBank record."
+                  />
                 </Panel>
 
                 <Panel title="Sequence Information" eyebrow="DNA validation" icon={FileJson}>
-                  <InfoGrid rows={[["Length", `${record.sequence.length.toLocaleString()} bp`], ["Molecule type", record.sequence.moleculeType]]} />
+                  <InfoGrid
+                    rows={[
+                      ["Length", `${record.sequence.length.toLocaleString()} bp`],
+                      ["Molecule type", record.sequence.moleculeType],
+                    ]}
+                  />
                   <CollapsibleSection title="Unsupported base summary">
                     {record.sequence.unsupportedBases.length > 0 ? (
                       <div className="space-y-2 text-sm">
                         {record.sequence.unsupportedBases.map((item) => (
-                          <div key={item.base} className="rounded-lg border border-yellow-400/20 bg-yellow-400/10 p-3 text-yellow-100">
-                            {item.base}: {item.count.toLocaleString()} occurrences; first positions {item.firstPositions.join(", ")}
+                          <div
+                            key={item.base}
+                            className="rounded-lg border border-yellow-400/20 bg-yellow-400/10 p-3 text-yellow-100"
+                          >
+                            {item.base}: {item.count.toLocaleString()} occurrences; first positions{" "}
+                            {item.firstPositions.join(", ")}
                           </div>
                         ))}
                       </div>
                     ) : (
-                      <p className="text-sm text-muted-foreground">No unsupported bases detected.</p>
+                      <p className="text-sm text-muted-foreground">
+                        No unsupported bases detected.
+                      </p>
                     )}
                   </CollapsibleSection>
                 </Panel>
 
-                <Panel title="References and Source" eyebrow="Less frequent metadata" icon={FileText}>
+                <Panel
+                  title="References and Source"
+                  eyebrow="Less frequent metadata"
+                  icon={FileText}
+                >
                   <CollapsibleSection title="References">
                     {record.references.length > 0 ? (
                       <div className="space-y-3">
                         {record.references.map((reference, index) => (
-                          <div key={`${reference.title}-${index}`} className="rounded-lg border border-white/10 bg-white/5 p-3 text-sm">
-                            <div className="font-medium">{reference.title || "Untitled reference"}</div>
+                          <div
+                            key={`${reference.title}-${index}`}
+                            className="rounded-lg border border-white/10 bg-white/5 p-3 text-sm"
+                          >
+                            <div className="font-medium">
+                              {reference.title || "Untitled reference"}
+                            </div>
                             <div className="mt-1 text-muted-foreground">{reference.journal}</div>
-                            {reference.pubmed && <div className="mt-1 font-mono text-xs text-emerald">PubMed {reference.pubmed}</div>}
+                            {reference.pubmed && (
+                              <div className="mt-1 font-mono text-xs text-emerald">
+                                PubMed {reference.pubmed}
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -287,7 +353,9 @@ export function NcbiRecordDetails({ accession }: { accession: string }) {
                 </Panel>
 
                 <Panel title="Raw FASTA Sequence" eyebrow="Sequence data" icon={FileText}>
-                  <pre className="max-h-96 max-w-full overflow-auto rounded-xl bg-black/40 p-4 font-mono text-xs text-muted-foreground">{record.fasta}</pre>
+                  <pre className="max-h-96 max-w-full overflow-auto rounded-xl bg-black/40 p-4 font-mono text-xs text-muted-foreground">
+                    {record.fasta}
+                  </pre>
                 </Panel>
               </div>
 
@@ -305,19 +373,40 @@ export function NcbiRecordDetails({ accession }: { accession: string }) {
                   <div className="space-y-3">
                     <div className="grid gap-2">
                       {sectionLabels.map((item) => (
-                        <label key={item.key} className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 p-2 text-sm">
-                          <Checkbox checked={selected[item.key]} onCheckedChange={(checked) => setSelected((current) => ({ ...current, [item.key]: checked === true }))} />
+                        <label
+                          key={item.key}
+                          className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 p-2 text-sm"
+                        >
+                          <Checkbox
+                            checked={selected[item.key]}
+                            onCheckedChange={(checked) =>
+                              setSelected((current) => ({
+                                ...current,
+                                [item.key]: checked === true,
+                              }))
+                            }
+                          />
                           {item.label}
                         </label>
                       ))}
                     </div>
-                    <select value={format} onChange={(event) => setFormat(event.target.value as "json" | "csv" | "txt" | "fasta")} className="theme-select w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm">
+                    <select
+                      value={format}
+                      onChange={(event) =>
+                        setFormat(event.target.value as "json" | "csv" | "txt" | "fasta")
+                      }
+                      className="theme-select w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm"
+                    >
                       <option value="json">JSON</option>
                       <option value="csv">CSV metadata</option>
                       <option value="txt">TXT</option>
                       <option value="fasta">FASTA</option>
                     </select>
-                    <a href={`data:text/plain;charset=utf-8,${encodeURIComponent(downloadData)}`} download={filename} className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-emerald px-4 py-2 text-sm font-semibold text-primary-foreground glow-emerald">
+                    <a
+                      href={`data:text/plain;charset=utf-8,${encodeURIComponent(downloadData)}`}
+                      download={filename}
+                      className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-emerald px-4 py-2 text-sm font-semibold text-primary-foreground glow-emerald"
+                    >
                       <Download className="h-4 w-4" /> Download {format.toUpperCase()}
                     </a>
                   </div>
@@ -343,7 +432,9 @@ function GenomeViewerPanel({
   error: string;
 }) {
   if (!record.organism.taxId) {
-    return <p className="text-sm text-muted-foreground">No taxonomy ID was returned for this record.</p>;
+    return (
+      <p className="text-sm text-muted-foreground">No taxonomy ID was returned for this record.</p>
+    );
   }
   if (loading) {
     return (
@@ -353,7 +444,11 @@ function GenomeViewerPanel({
     );
   }
   if (error) {
-    return <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-300">{error}</div>;
+    return (
+      <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-300">
+        {error}
+      </div>
+    );
   }
   if (!context) {
     return <p className="text-sm text-muted-foreground">Taxonomy context is unavailable.</p>;
@@ -363,9 +458,16 @@ function GenomeViewerPanel({
       <div className="overflow-hidden rounded-xl border border-white/10 bg-black/20">
         {context.image ? (
           <>
-            <img src={context.image.url} alt={context.scientificName} className="h-48 w-full object-cover" referrerPolicy="no-referrer" />
+            <img
+              src={context.image.url}
+              alt={context.scientificName}
+              className="h-48 w-full object-cover"
+              referrerPolicy="no-referrer"
+            />
             <div className="border-t border-white/10 p-3">
-              <div className="text-sm font-semibold">{context.image.title || context.scientificName}</div>
+              <div className="text-sm font-semibold">
+                {context.image.title || context.scientificName}
+              </div>
               <div className="mt-1 text-xs text-muted-foreground">
                 {context.image.description || context.image.source}
               </div>
@@ -380,7 +482,10 @@ function GenomeViewerPanel({
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2">
-        <MetricBox label="Selected organism" value={context.scientificName || record.organism.scientificName} />
+        <MetricBox
+          label="Selected organism"
+          value={context.scientificName || record.organism.scientificName}
+        />
         <MetricBox label="Taxonomy ID" value={context.taxId} />
         <MetricBox label="Rank" value={context.rank || "Not available"} />
         <MetricBox label="Division" value={context.division || "Not available"} />
@@ -389,14 +494,28 @@ function GenomeViewerPanel({
       <TaxonomyTree nodes={context.treeNodes} />
 
       <div className="flex flex-wrap gap-2">
-        <Link to="/ncbi/organism/$taxId" params={{ taxId: context.taxId }} className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs hover:bg-white/10">
+        <Link
+          to="/ncbi/organism/$taxId"
+          params={{ taxId: context.taxId }}
+          className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs hover:bg-white/10"
+        >
           View Organism Details
         </Link>
-        <a href={context.links.genomeDataViewer} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs hover:bg-white/10">
+        <a
+          href={context.links.genomeDataViewer}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs hover:bg-white/10"
+        >
           NCBI GDV <ExternalLink className="h-3.5 w-3.5" />
         </a>
         {context.image?.pageUrl ? (
-          <a href={context.image.pageUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs hover:bg-white/10">
+          <a
+            href={context.image.pageUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs hover:bg-white/10"
+          >
             Image Source <ExternalLink className="h-3.5 w-3.5" />
           </a>
         ) : null}
@@ -412,18 +531,32 @@ function TaxonomyTree({ nodes }: { nodes: GenomeViewerContext["treeNodes"] }) {
   }
   return (
     <div className="rounded-xl border border-white/10 bg-white/5 p-4">
-      <div className="mb-3 text-xs uppercase tracking-widest text-emerald">Phylogenetic placement</div>
+      <div className="mb-3 text-xs uppercase tracking-widest text-emerald">
+        Phylogenetic placement
+      </div>
       <div className="space-y-0">
         {visibleNodes.map((node, index) => (
           <div key={`${node.taxId}-${index}`} className="relative flex gap-3">
             <div className="flex w-8 shrink-0 flex-col items-center">
-              <span className={`h-4 w-4 rounded-full border ${node.isSelected ? "border-emerald bg-emerald glow-emerald" : "border-emerald/60 bg-background"}`} />
-              {index < visibleNodes.length - 1 ? <span className="h-10 w-px bg-emerald/40" /> : null}
+              <span
+                className={`h-4 w-4 rounded-full border ${node.isSelected ? "border-emerald bg-emerald glow-emerald" : "border-emerald/60 bg-background"}`}
+              />
+              {index < visibleNodes.length - 1 ? (
+                <span className="h-10 w-px bg-emerald/40" />
+              ) : null}
             </div>
-            <div className={`mb-3 min-w-0 flex-1 rounded-lg border p-3 ${node.isSelected ? "border-emerald/50 bg-emerald/10" : "border-white/10 bg-black/20"}`}>
+            <div
+              className={`mb-3 min-w-0 flex-1 rounded-lg border p-3 ${node.isSelected ? "border-emerald/50 bg-emerald/10" : "border-white/10 bg-black/20"}`}
+            >
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="min-w-0 break-words text-sm font-semibold">{node.scientificName}</div>
-                {node.isSelected ? <span className="rounded-full bg-emerald px-2 py-0.5 text-[10px] font-semibold text-primary-foreground">Selected</span> : null}
+                <div className="min-w-0 break-words text-sm font-semibold">
+                  {node.scientificName}
+                </div>
+                {node.isSelected ? (
+                  <span className="rounded-full bg-emerald px-2 py-0.5 text-[10px] font-semibold text-primary-foreground">
+                    Selected
+                  </span>
+                ) : null}
               </div>
               <div className="mt-1 flex flex-wrap gap-2 text-[11px] text-muted-foreground">
                 <span>{node.rank || "no rank"}</span>
@@ -475,7 +608,11 @@ function JsonBlock({ data, empty }: { data: unknown; empty: string }) {
   if (!data || (typeof data === "object" && Object.keys(data).length === 0)) {
     return <p className="text-sm text-muted-foreground">{empty}</p>;
   }
-  return <pre className="max-h-80 max-w-full overflow-auto rounded-xl bg-black/40 p-4 font-mono text-xs text-muted-foreground">{JSON.stringify(data, null, 2)}</pre>;
+  return (
+    <pre className="max-h-80 max-w-full overflow-auto rounded-xl bg-black/40 p-4 font-mono text-xs text-muted-foreground">
+      {JSON.stringify(data, null, 2)}
+    </pre>
+  );
 }
 
 function Panel({
@@ -490,7 +627,12 @@ function Panel({
   children: ReactNode;
 }) {
   return (
-    <motion.section variants={fadeUp} initial="hidden" animate="show" className="glass min-w-0 overflow-hidden rounded-2xl p-5">
+    <motion.section
+      variants={fadeUp}
+      initial="hidden"
+      animate="show"
+      className="glass min-w-0 overflow-hidden rounded-2xl p-5"
+    >
       <div className="mb-4 flex items-start justify-between gap-3">
         <div>
           <div className="text-xs uppercase tracking-widest text-emerald">{eyebrow}</div>
@@ -507,17 +649,27 @@ function buildSelectedData(record: RecordDetail, selected: Record<SectionKey, bo
   if (selected.complete) return record;
   const data: Record<string, unknown> = {};
   if (selected.overview) data.overview = record.overview;
-  if (selected.organism) data.organism = { organismName: record.organism.organismName, scientificName: record.organism.scientificName };
-  if (selected.taxonomy) data.taxonomy = { taxonomy: record.organism.taxonomy, taxId: record.organism.taxId };
+  if (selected.organism)
+    data.organism = {
+      organismName: record.organism.organismName,
+      scientificName: record.organism.scientificName,
+    };
+  if (selected.taxonomy)
+    data.taxonomy = { taxonomy: record.organism.taxonomy, taxId: record.organism.taxId };
   if (selected.gene) data.gene = record.gene;
-  if (selected.identifiers) data.identifiers = { accession: record.overview.accession, ncbiUrl: record.overview.ncbiUrl };
+  if (selected.identifiers)
+    data.identifiers = { accession: record.overview.accession, ncbiUrl: record.overview.ncbiUrl };
   if (selected.sequence) data.sequence = record.sequence;
   if (selected.references) data.references = record.references;
   if (selected.fasta) data.fasta = record.fasta;
   return data;
 }
 
-function buildDownloadData(record: RecordDetail, data: Record<string, unknown>, format: "json" | "csv" | "txt" | "fasta") {
+function buildDownloadData(
+  record: RecordDetail,
+  data: Record<string, unknown>,
+  format: "json" | "csv" | "txt" | "fasta",
+) {
   if (format === "json") return JSON.stringify(data, null, 2);
   if (format === "fasta") return "fasta" in data || "rawSequence" in data ? record.fasta : "";
   if (format === "csv") return toCsv(data);
@@ -544,7 +696,10 @@ function csvCell(value: string) {
 
 function toText(data: Record<string, unknown>) {
   return Object.entries(data)
-    .map(([section, value]) => `${section.toUpperCase()}\n${typeof value === "string" ? value : JSON.stringify(value, null, 2)}`)
+    .map(
+      ([section, value]) =>
+        `${section.toUpperCase()}\n${typeof value === "string" ? value : JSON.stringify(value, null, 2)}`,
+    )
     .join("\n\n");
 }
 

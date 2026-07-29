@@ -31,14 +31,21 @@ type OrganismDetails = {
   ncbiUrl: string;
 };
 
-export async function fetchGenomeViewerContext(apiBase: string, taxId: string): Promise<GenomeViewerContext> {
-  const viewerResponse = await fetch(`${apiBase}/api/ncbi/organisms/${encodeURIComponent(taxId)}/genome-viewer`);
+export async function fetchGenomeViewerContext(
+  apiBase: string,
+  taxId: string,
+): Promise<GenomeViewerContext> {
+  const viewerResponse = await fetch(
+    `${apiBase}/api/ncbi/organisms/${encodeURIComponent(taxId)}/genome-viewer`,
+  );
   if (viewerResponse.ok) {
     return viewerResponse.json();
   }
 
   const detailsResponse = await fetch(`${apiBase}/api/ncbi/organisms/${encodeURIComponent(taxId)}`);
-  const detailsBody = await detailsResponse.json().catch(() => ({ detail: detailsResponse.statusText }));
+  const detailsBody = await detailsResponse
+    .json()
+    .catch(() => ({ detail: detailsResponse.statusText }));
   if (!detailsResponse.ok) {
     throw new Error(String(detailsBody.detail || detailsResponse.statusText));
   }
@@ -120,5 +127,7 @@ async function fetchWikimediaImage(scientificName: string): Promise<GenomeViewer
 
 function gdvUrl(scientificName: string) {
   const slug = scientificName.trim().toLowerCase().replace(/\s+/g, "-");
-  return slug ? `https://www.ncbi.nlm.nih.gov/gdv?org=${encodeURIComponent(slug)}` : "https://www.ncbi.nlm.nih.gov/gdv";
+  return slug
+    ? `https://www.ncbi.nlm.nih.gov/gdv?org=${encodeURIComponent(slug)}`
+    : "https://www.ncbi.nlm.nih.gov/gdv";
 }
