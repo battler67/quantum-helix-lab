@@ -167,6 +167,12 @@ GET /api/quantum-search/hardware/jobs/{job_id}/results
 
 ## Limitations
 
+- The portal does not require a successful frontend estimate before opening
+  the real-hardware confirmation. This removes stale or conservative UI
+  eligibility gates; it does not bypass backend circuit validation or provider
+  restrictions. Circuit construction, live device capacity, topology,
+  transpilation, account entitlements, and provider limits can still reject
+  the request before an external job is accepted.
 - Pasted and FASTA inputs can contain up to 100,000 bases, but real-hardware
   execution compiles only the configured bounded quantum window. A successful
   156-qubit planning estimate is not a claim that both complete long strings

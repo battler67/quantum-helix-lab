@@ -10,6 +10,11 @@ downloaded dependencies, credentials, build folders, or generated experiment out
 See [docs/AI_REPORT_GENERATOR.md](docs/AI_REPORT_GENERATOR.md) for the optional,
 backend-only OpenAI report generator and PDF download workflow.
 
+See
+[docs/CLASSICAL_QUANTUM_SCALING.md](docs/CLASSICAL_QUANTUM_SCALING.md) for the
+Hybrid/Grover theoretical scaling form, formulas, timing assumptions, and
+limitations.
+
 ## Repository layout
 
 ```text

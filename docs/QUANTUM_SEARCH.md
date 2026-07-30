@@ -3,6 +3,9 @@
 AI-generated, mode-aware result reports are documented in
 [AI_REPORT_GENERATOR.md](AI_REPORT_GENERATOR.md).
 
+The Hybrid/Grover theoretical query and timing projections are documented in
+[CLASSICAL_QUANTUM_SCALING.md](CLASSICAL_QUANTUM_SCALING.md).
+
 ## Overview
 
 The new genomic quantum search workflow is a BLAST-like nucleotide search experience, not an implementation of the BLAST algorithm. NCBI performs genomic sequence discovery and retrieval. The project then normalizes and windows retrieved genomic DNA before calling the existing FRQI or Grover/QGSA quantum simulator code.
@@ -173,6 +176,21 @@ Example local Grover request:
 10. Watch progress through retrieval, preprocessing, circuit construction, simulation, validation, and results.
 11. Inspect ranked hits, one-based coordinates, quantum metrics, validation status, and actual probability/count charts.
 12. Download JSON, CSV, or FASTA for returned windows.
+
+## Action availability
+
+- `Estimate` remains clickable whenever another estimate/search operation is
+  not running. Missing or invalid inputs are explained by a dialog instead of
+  leaving the button silently disabled.
+- `Run Search` is resource-driven. It requires a fresh successful estimate and
+  remains disabled when that estimate reports that the bounded circuit exceeds
+  local simulator limits.
+- `Run on Real Hardware` is not blocked by the frontend estimate or its
+  planning-capacity flag. The confirmation remains explicit, and backend
+  circuit construction, live provider discovery, topology, transpilation,
+  account access, and provider limits remain authoritative.
+- Changing any search configuration clears the previous estimate, so simulator
+  execution cannot use stale resource information.
 
 ## Testing
 

@@ -32,6 +32,7 @@ import {
   YAxis,
 } from "recharts";
 import { BackgroundFX } from "@/components/BackgroundFX";
+import { ClassicalQuantumScaling } from "@/components/ClassicalQuantumScaling";
 import { LoadingInsight } from "@/components/LoadingInsight";
 import { Button } from "@/components/ui/button";
 import {
@@ -44,13 +45,10 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  AI_REPORT_SECTIONS,
-  reportFactRows,
-  type AiAnalysisReport,
-} from "@/lib/ai-report";
+import { AI_REPORT_SECTIONS, reportFactRows, type AiAnalysisReport } from "@/lib/ai-report";
 import { downloadAiReportPdf } from "@/lib/ai-report-pdf";
 import { analyzeHybridMutations } from "@/lib/hybridMutationAnalysis";
+import { quantumActionAvailability } from "@/lib/quantum-action-availability";
 import frqiClaimedGraph from "../../cacheResults/Images/frqi_claimed.png";
 
 const fadeUp: Variants = {
@@ -437,8 +435,7 @@ export function QuantumSearch() {
     (querySource === "pasted" &&
       scope === "pasted_sequence" &&
       referenceAlphabetValid &&
-      hybridLengthsMatch &&
-      sequencePreview.length <= 32);
+      hybridLengthsMatch);
   const referenceValid =
     scope !== "pasted_sequence" ||
     (referenceAlphabetValid &&
@@ -446,7 +443,41 @@ export function QuantumSearch() {
         ? hybridLengthsMatch
         : referencePreview.length >= boundedQueryLength) &&
       referencePreview.length <= MAX_INPUT_SEQUENCE_LENGTH);
+  const scalingQuerySequence = sequencePreview.slice(0, Math.max(1, maxQueryLength));
+  const scalingReferenceLength = Math.max(
+    1,
+    referencePreview.length || scalingQuerySequence.length,
+  );
+  const scalingQueryLength = Math.max(1, scalingQuerySequence.length);
+  const scalingMarkedCount = useMemo(() => {
+    if (algorithm === "hybrid") {
+      if (
+        !referenceAlphabetValid ||
+        referencePreview.length !== sequencePreview.length ||
+        sequencePreview.length < 1
+      ) {
+        return 0;
+      }
+      return analyzeHybridMutations(referencePreview, sequencePreview).mutationCount;
+    }
+    if (algorithm === "grover" && referenceAlphabetValid && scalingQuerySequence.length > 0) {
+      return countExactPatternMatches(referencePreview, scalingQuerySequence);
+    }
+    if (
+      algorithm === "frqi" &&
+      referenceAlphabetValid &&
+      referencePreview.length === scalingQuerySequence.length
+    ) {
+      return analyzeHybridMutations(referencePreview, scalingQuerySequence).mutationCount;
+    }
+    return 1;
+  }, [algorithm, referenceAlphabetValid, referencePreview, scalingQuerySequence, sequencePreview]);
   const largeScope = maxRecords > 10 || maxWindows > 64;
+  const actionAvailability = quantumActionAvailability({
+    busy,
+    hardwareBusy,
+    estimate,
+  });
   const jobStageStatuses = new Set([
     ...(jobStatus?.progress?.map((entry) => entry.status) ?? []),
     ...(jobStatus?.status ? [jobStatus.status] : []),
@@ -651,6 +682,13 @@ export function QuantumSearch() {
       showQueryLengthDialog();
       return;
     }
+    if (!queryValid) {
+      setLimitDialog({
+        title: "Query sequence required",
+        message: "Enter a non-empty A/C/G/T query sequence before estimating resources.",
+      });
+      return;
+    }
     if (!referenceValid) {
       setLimitDialog({
         title:
@@ -667,8 +705,7 @@ export function QuantumSearch() {
     if (!hybridInputsValid) {
       setLimitDialog({
         title: "Hybrid inputs required",
-        message:
-          "Hybrid mode requires pasted equal-length A/C/G/T sequences, with at most 32 bases each.",
+        message: "Hybrid mode requires pasted equal-length A/C/G/T sequences.",
       });
       return;
     }
@@ -699,6 +736,13 @@ export function QuantumSearch() {
       showQueryLengthDialog();
       return;
     }
+    if (!queryValid) {
+      setLimitDialog({
+        title: "Query sequence required",
+        message: "Enter a non-empty A/C/G/T query sequence before starting execution.",
+      });
+      return;
+    }
     if (!referenceValid) {
       setLimitDialog({
         title:
@@ -715,8 +759,7 @@ export function QuantumSearch() {
     if (!hybridInputsValid) {
       setLimitDialog({
         title: "Hybrid inputs required",
-        message:
-          "Hybrid mode requires pasted equal-length A/C/G/T sequences, with at most 32 bases each.",
+        message: "Hybrid mode requires pasted equal-length A/C/G/T sequences.",
       });
       return;
     }
@@ -767,6 +810,13 @@ export function QuantumSearch() {
       showQueryLengthDialog();
       return;
     }
+    if (!queryValid) {
+      setLimitDialog({
+        title: "Query sequence required",
+        message: "Enter a non-empty A/C/G/T query sequence before using real hardware.",
+      });
+      return;
+    }
     if (!referenceValid) {
       setLimitDialog({
         title: "Reference sequence required",
@@ -778,23 +828,7 @@ export function QuantumSearch() {
     if (!hybridInputsValid) {
       setLimitDialog({
         title: "Hybrid inputs required",
-        message:
-          "Hybrid mode requires pasted equal-length A/C/G/T sequences, with at most 32 bases each.",
-      });
-      return;
-    }
-    if (!estimate) {
-      setLimitDialog({
-        title: "New estimate required",
-        message:
-          "Run Estimate first so the circuit resource requirement is visible before spending a hardware job.",
-      });
-      return;
-    }
-    if (!estimate.hardwareEligible) {
-      setLimitDialog({
-        title: "Bounded circuit is not hardware eligible",
-        message: estimate.hardwareEligibilityNote,
+        message: "Hybrid mode requires pasted equal-length A/C/G/T sequences.",
       });
       return;
     }
@@ -934,14 +968,7 @@ export function QuantumSearch() {
           <div className="flex flex-wrap gap-2">
             <Button
               onClick={handleEstimate}
-              disabled={
-                busy ||
-                !queryValid ||
-                !queryWithinLength ||
-                !referenceValid ||
-                !hybridInputsValid ||
-                !algorithm
-              }
+              disabled={!actionAvailability.canEstimate}
               variant="outline"
               className="rounded-full border-white/10 bg-white/5"
             >
@@ -949,14 +976,7 @@ export function QuantumSearch() {
             </Button>
             <Button
               onClick={handleRun}
-              disabled={
-                busy ||
-                hardwareBusy ||
-                !estimate ||
-                estimate.exceedsSimulatorLimits ||
-                !hybridInputsValid ||
-                !algorithm
-              }
+              disabled={!actionAvailability.canRunSearch}
               className="rounded-full bg-emerald text-primary-foreground glow-emerald"
             >
               {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}{" "}
@@ -964,14 +984,7 @@ export function QuantumSearch() {
             </Button>
             <Button
               onClick={handleHardwareRunRequest}
-              disabled={
-                busy ||
-                hardwareBusy ||
-                !estimate ||
-                !estimate.hardwareEligible ||
-                !hybridInputsValid ||
-                !algorithm
-              }
+              disabled={!actionAvailability.canRequestHardware}
               variant="outline"
               className="rounded-full border-cyan-glow/30 bg-cyan-glow/10 text-cyan-glow hover:bg-cyan-glow/20"
             >
@@ -1494,6 +1507,15 @@ export function QuantumSearch() {
           </div>
         )}
 
+        {algorithm && (
+          <ClassicalQuantumScaling
+            mode={algorithm}
+            referenceLength={scalingReferenceLength}
+            queryLength={scalingQueryLength}
+            markedCount={scalingMarkedCount}
+          />
+        )}
+
         <Dialog open={limitDialog !== null} onOpenChange={(open) => !open && setLimitDialog(null)}>
           <DialogContent className="border-yellow-400/20 bg-background">
             <DialogHeader>
@@ -1525,6 +1547,11 @@ export function QuantumSearch() {
                   qBraid fails, QDNA may make one IBM fallback submission, so one confirmation can
                   consume up to two provider jobs. Results are raw hardware measurements without
                   error mitigation.
+                </span>
+                <span className="block">
+                  Frontend estimates do not block this request. Circuit construction, live device
+                  capacity, topology, transpilation, provider access, and provider limits remain
+                  authoritative and may reject the job before external submission.
                 </span>
               </DialogDescription>
             </DialogHeader>
@@ -1895,10 +1922,9 @@ export function QuantumSearchResultsPage({ jobId }: { jobId: string }) {
     setReportLoading(true);
     setReportError("");
     try {
-      const response = await fetch(
-        `${API_BASE}/api/quantum-search/jobs/${result.jobId}/report`,
-        { method: "POST" },
-      );
+      const response = await fetch(`${API_BASE}/api/quantum-search/jobs/${result.jobId}/report`, {
+        method: "POST",
+      });
       const body = await response.json().catch(() => ({ detail: response.statusText }));
       if (!response.ok) throw new Error(formatApiError(body, "AI report generation failed"));
       setAiReport(body as AiAnalysisReport);
@@ -3063,6 +3089,15 @@ function VisualizationCard({
 
 function normalizeDnaInput(value: string) {
   return value.replace(/^>.*$/gm, "").replace(/\s/g, "").toUpperCase();
+}
+
+function countExactPatternMatches(reference: string, query: string): number {
+  if (!reference || !query || query.length > reference.length) return 0;
+  let matches = 0;
+  for (let start = 0; start <= reference.length - query.length; start += 1) {
+    if (reference.slice(start, start + query.length) === query) matches += 1;
+  }
+  return matches;
 }
 
 function formatApiError(body: unknown, fallback: string) {
