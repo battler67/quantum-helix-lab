@@ -20,7 +20,16 @@ import {
   XCircle,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Legend,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import { BackgroundFX } from "@/components/BackgroundFX";
 import { LoadingInsight } from "@/components/LoadingInsight";
 import { Button } from "@/components/ui/button";
@@ -46,6 +55,7 @@ const fadeUp: Variants = {
 };
 
 const API_BASE = import.meta.env.VITE_QUANTUM_API_BASE_URL || "http://127.0.0.1:8000";
+const MAX_INPUT_SEQUENCE_LENGTH = 100_000;
 
 type Algorithm = "frqi" | "grover" | "hybrid";
 type Scope =
@@ -62,6 +72,9 @@ type Scope =
   | "pasted_sequence";
 
 type Estimate = {
+  inputQueryLength: number;
+  quantumWindowLength: number;
+  inputTruncatedForQuantum: boolean;
   recordCount: number;
   totalBases: number;
   totalWindows: number;
@@ -73,6 +86,9 @@ type Estimate = {
   estimatedLogicalQubits: number;
   estimatedGroverIterations: number;
   exceedsSimulatorLimits: boolean;
+  hardwareEligible: boolean;
+  hardwareQubitCapacity: number;
+  hardwareEligibilityNote: string;
   samplingOrTruncation: boolean;
   estimateMode: "metadata_only";
   estimatedSimulationSecondsMin: number;
@@ -88,7 +104,14 @@ type SearchResult = {
   jobId: string;
   algorithm: string;
   quantumAlphabet: "ACGT";
-  query?: { length: number; sequence?: string; sequencePreview: string };
+  query?: {
+    length: number;
+    sequence?: string;
+    sequencePreview: string;
+    inputLength?: number;
+    quantumWindowLength?: number;
+    inputTruncatedForQuantum?: boolean;
+  };
   reference?: {
     source: string;
     scope: string;
@@ -380,6 +403,8 @@ export function QuantumSearch() {
   const [jobStatus, setJobStatus] = useState<JobStatusSnapshot | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [hardwareBusy, setHardwareBusy] = useState(false);
+  const [hardwareConfirmOpen, setHardwareConfirmOpen] = useState(false);
   const [limitDialog, setLimitDialog] = useState<{ title: string; message: string } | null>(null);
   const [analysisImport, setAnalysisImport] = useState<AnalysisImport | null>(null);
   const [analysisLoading, setAnalysisLoading] = useState(false);
@@ -390,19 +415,28 @@ export function QuantumSearch() {
   const didMount = useRef(false);
 
   const activeQuery = querySource === "uploaded_fasta" ? uploadedFasta : querySequence;
-  const sequencePreview = useMemo(
-    () => activeQuery.replace(/^>.*$/gm, "").replace(/\s/g, "").toUpperCase(),
-    [activeQuery],
-  );
+  const sequencePreview = useMemo(() => normalizeDnaInput(activeQuery), [activeQuery]);
   const queryValid = /^[ACGT]*$/.test(sequencePreview) && sequencePreview.length > 0;
-  const queryWithinLength = sequencePreview.length <= maxQueryLength;
-  const referencePreview = useMemo(
-    () => referenceSequence.replace(/\s/g, "").toUpperCase(),
-    [referenceSequence],
-  );
+  const queryWithinLength = sequencePreview.length <= MAX_INPUT_SEQUENCE_LENGTH;
+  const boundedQueryLength = Math.min(sequencePreview.length, maxQueryLength);
+  const referencePreview = useMemo(() => normalizeDnaInput(referenceSequence), [referenceSequence]);
+  const referenceAlphabetValid = /^[ACGT]+$/.test(referencePreview);
+  const hybridLengthsMatch =
+    sequencePreview.length > 0 && sequencePreview.length === referencePreview.length;
+  const hybridInputsValid =
+    algorithm !== "hybrid" ||
+    (querySource === "pasted" &&
+      scope === "pasted_sequence" &&
+      referenceAlphabetValid &&
+      hybridLengthsMatch &&
+      sequencePreview.length <= 32);
   const referenceValid =
     scope !== "pasted_sequence" ||
-    (/^[ACGT]+$/.test(referencePreview) && referencePreview.length >= sequencePreview.length);
+    (referenceAlphabetValid &&
+      (algorithm === "hybrid"
+        ? hybridLengthsMatch
+        : referencePreview.length >= boundedQueryLength) &&
+      referencePreview.length <= MAX_INPUT_SEQUENCE_LENGTH);
   const largeScope = maxRecords > 10 || maxWindows > 64;
   const jobStageStatuses = new Set([
     ...(jobStatus?.progress?.map((entry) => entry.status) ?? []),
@@ -504,18 +538,18 @@ export function QuantumSearch() {
     });
   };
 
-  const showQueryLengthDialog = (limit = maxQueryLength) => {
+  const showQueryLengthDialog = (limit = MAX_INPUT_SEQUENCE_LENGTH) => {
+    const boundedRegion = limit === maxQueryLength;
     setLimitDialog({
-      title: "Query length limit exceeded",
-      message: `The active query is ${sequencePreview.length} bases long. This form currently allows up to ${limit} bases; the portal maximum is 128 bases.`,
+      title: boundedRegion ? "Quantum window limit exceeded" : "Input sequence limit exceeded",
+      message: boundedRegion
+        ? `The selected region exceeds the configured ${limit}-base quantum window. Select a smaller region or increase Quantum window length.`
+        : `The active query contains ${sequencePreview.length.toLocaleString()} bases. The portal accepts at most ${MAX_INPUT_SEQUENCE_LENGTH.toLocaleString()} input bases.`,
     });
   };
 
   const handleMaxQueryLengthChange = (value: number) => {
     setMaxQueryLength(value);
-    if (sequencePreview.length > value) {
-      showQueryLengthDialog(value);
-    }
   };
 
   const applyAnalysisRegion = () => {
@@ -563,8 +597,8 @@ export function QuantumSearch() {
     assemblyAccessions: splitList(assemblyAccessions),
     nucleotideAccessions: splitList(nucleotideAccessions),
     maxRecords,
-    maxBasesPerRecord: 10000,
-    maxTotalBases: 50000,
+    maxBasesPerRecord: MAX_INPUT_SEQUENCE_LENGTH,
+    maxTotalBases: MAX_INPUT_SEQUENCE_LENGTH,
     maxWindows,
     maxQueryLength,
     strand,
@@ -610,9 +644,22 @@ export function QuantumSearch() {
     }
     if (!referenceValid) {
       setLimitDialog({
-        title: "Reference sequence required",
+        title:
+          algorithm === "hybrid"
+            ? "Equal-length sequences required"
+            : "Reference sequence required",
         message:
-          "Enter an A/C/G/T reference sequence at least as long as the active query before estimating.",
+          algorithm === "hybrid"
+            ? "Hybrid mode requires pasted A/C/G/T query and reference sequences with exactly the same length."
+            : "Enter an A/C/G/T or FASTA reference sequence at least as long as the configured quantum window before estimating.",
+      });
+      return;
+    }
+    if (!hybridInputsValid) {
+      setLimitDialog({
+        title: "Hybrid inputs required",
+        message:
+          "Hybrid mode requires pasted equal-length A/C/G/T sequences, with at most 32 bases each.",
       });
       return;
     }
@@ -645,9 +692,22 @@ export function QuantumSearch() {
     }
     if (!referenceValid) {
       setLimitDialog({
-        title: "Reference sequence required",
+        title:
+          algorithm === "hybrid"
+            ? "Equal-length sequences required"
+            : "Reference sequence required",
         message:
-          "Enter an A/C/G/T reference sequence at least as long as the active query before starting execution.",
+          algorithm === "hybrid"
+            ? "Hybrid mode requires pasted A/C/G/T query and reference sequences with exactly the same length."
+            : "Enter an A/C/G/T or FASTA reference sequence at least as long as the configured quantum window before starting execution.",
+      });
+      return;
+    }
+    if (!hybridInputsValid) {
+      setLimitDialog({
+        title: "Hybrid inputs required",
+        message:
+          "Hybrid mode requires pasted equal-length A/C/G/T sequences, with at most 32 bases each.",
       });
       return;
     }
@@ -658,6 +718,14 @@ export function QuantumSearch() {
           "Search settings changed after the last estimate. Run Estimate again before starting execution.",
       });
       setStatus("Run a new estimate before execution");
+      return;
+    }
+    if (estimate.exceedsSimulatorLimits) {
+      setLimitDialog({
+        title: "Bounded circuit exceeds simulator limits",
+        message:
+          "The current estimate is not eligible for local Aer execution. Reduce Quantum window length or choose another algorithm.",
+      });
       return;
     }
     setBusy(true);
@@ -675,6 +743,72 @@ export function QuantumSearch() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Search failed");
       setBusy(false);
+    }
+  }
+
+  function handleHardwareRunRequest() {
+    if (!algorithm) {
+      setLimitDialog({
+        title: "Algorithm required",
+        message: "Select FRQI, Grover, or Hybrid before using real hardware.",
+      });
+      return;
+    }
+    if (!queryWithinLength) {
+      showQueryLengthDialog();
+      return;
+    }
+    if (!referenceValid) {
+      setLimitDialog({
+        title: "Reference sequence required",
+        message:
+          "Enter an A/C/G/T or FASTA reference sequence at least as long as the configured quantum window before using real hardware.",
+      });
+      return;
+    }
+    if (!hybridInputsValid) {
+      setLimitDialog({
+        title: "Hybrid inputs required",
+        message:
+          "Hybrid mode requires pasted equal-length A/C/G/T sequences, with at most 32 bases each.",
+      });
+      return;
+    }
+    if (!estimate) {
+      setLimitDialog({
+        title: "New estimate required",
+        message:
+          "Run Estimate first so the circuit resource requirement is visible before spending a hardware job.",
+      });
+      return;
+    }
+    if (!estimate.hardwareEligible) {
+      setLimitDialog({
+        title: "Bounded circuit is not hardware eligible",
+        message: estimate.hardwareEligibilityNote,
+      });
+      return;
+    }
+    setHardwareConfirmOpen(true);
+  }
+
+  async function confirmHardwareRun() {
+    setHardwareConfirmOpen(false);
+    setHardwareBusy(true);
+    setError("");
+    setStatus("Preparing real-hardware submission");
+    try {
+      const job = await postJson<{ jobId: string; status: string }>(
+        "/api/quantum-search/hardware/jobs",
+        {
+          searchRequest: requestPayload(),
+          confirmRealHardware: true,
+        },
+      );
+      void navigate({ to: "/quantum-hardware-results", search: { jobId: job.jobId } });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Real-hardware submission failed");
+      setHardwareBusy(false);
     }
   }
 
@@ -791,7 +925,14 @@ export function QuantumSearch() {
           <div className="flex flex-wrap gap-2">
             <Button
               onClick={handleEstimate}
-              disabled={busy || !queryValid || !referenceValid || !algorithm}
+              disabled={
+                busy ||
+                !queryValid ||
+                !queryWithinLength ||
+                !referenceValid ||
+                !hybridInputsValid ||
+                !algorithm
+              }
               variant="outline"
               className="rounded-full border-white/10 bg-white/5"
             >
@@ -799,11 +940,38 @@ export function QuantumSearch() {
             </Button>
             <Button
               onClick={handleRun}
-              disabled={busy || !estimate || estimate.exceedsSimulatorLimits || !algorithm}
+              disabled={
+                busy ||
+                hardwareBusy ||
+                !estimate ||
+                estimate.exceedsSimulatorLimits ||
+                !hybridInputsValid ||
+                !algorithm
+              }
               className="rounded-full bg-emerald text-primary-foreground glow-emerald"
             >
               {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}{" "}
               Run Search
+            </Button>
+            <Button
+              onClick={handleHardwareRunRequest}
+              disabled={
+                busy ||
+                hardwareBusy ||
+                !estimate ||
+                !estimate.hardwareEligible ||
+                !hybridInputsValid ||
+                !algorithm
+              }
+              variant="outline"
+              className="rounded-full border-cyan-glow/30 bg-cyan-glow/10 text-cyan-glow hover:bg-cyan-glow/20"
+            >
+              {hardwareBusy ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Cpu className="h-4 w-4" />
+              )}
+              {hardwareBusy ? "Submitting..." : "Run on Real Hardware"}
             </Button>
           </div>
         </motion.div>
@@ -816,7 +984,10 @@ export function QuantumSearch() {
                 {!algorithm
                   ? "Select FRQI, Grover, or Hybrid before estimating. Double-clicking a selected method clears it."
                   : algorithm === "hybrid"
-                    ? "Hybrid uses an in-circuit XOR mismatch predicate and an unknown-M fixed-point schedule. Inputs are compiled into bounded lookup gates; free QRAM is not assumed."
+                    ? !hybridLengthsMatch &&
+                      (sequencePreview.length > 0 || referencePreview.length > 0)
+                      ? `Hybrid requires equal lengths. Query: ${sequencePreview.length} bases; reference: ${referencePreview.length} bases. Estimate and Run Search stay disabled until they match.`
+                      : "Hybrid directly compares the pasted equal-length sequences with an in-circuit XOR mismatch predicate and an unknown-M fixed-point schedule. No sliding windows are generated."
                     : "Large database searches use staged retrieval and bounded quantum processing. The entire GenBank database is not loaded into the quantum circuit."}
               </span>
             </div>
@@ -958,7 +1129,10 @@ export function QuantumSearch() {
                 ) : (
                   <XCircle className="mr-1 inline h-3.5 w-3.5" />
                 )}
-                {sequencePreview.length} bases - ACGT only
+                {sequencePreview.length.toLocaleString()} input bases -{" "}
+                {queryWithinLength
+                  ? `${boundedQueryLength.toLocaleString()}-base quantum window`
+                  : `maximum ${MAX_INPUT_SEQUENCE_LENGTH.toLocaleString()}`}
               </div>
             </div>
           </Panel>
@@ -969,11 +1143,13 @@ export function QuantumSearch() {
               onChange={(event) => setScope(event.target.value as Scope)}
               className="theme-select w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm focus:border-emerald/40 focus:outline-none"
             >
-              {scopes.map((item) => (
-                <option key={item.value} value={item.value}>
-                  {item.label}
-                </option>
-              ))}
+              {scopes
+                .filter((item) => algorithm !== "hybrid" || item.value === "pasted_sequence")
+                .map((item) => (
+                  <option key={item.value} value={item.value}>
+                    {item.label}
+                  </option>
+                ))}
             </select>
             <p className="mt-2 text-xs text-muted-foreground">
               {scopes.find((item) => item.value === scope)?.detail}
@@ -993,10 +1169,14 @@ export function QuantumSearch() {
                   className="mt-2 h-32 resize-none border-white/10 bg-black/30 font-mono text-xs"
                 />
                 <div className={`mt-2 text-xs ${referenceValid ? "text-emerald" : "text-red-400"}`}>
-                  {referencePreview.length} bases —{" "}
-                  {referenceValid
-                    ? "valid ACGT reference"
-                    : "must be ACGT and at least query length"}
+                  {referencePreview.length.toLocaleString()} input bases —{" "}
+                  {algorithm === "hybrid"
+                    ? hybridLengthsMatch && referenceAlphabetValid
+                      ? "valid equal-length ACGT reference"
+                      : `must be ACGT and equal query length (${sequencePreview.length} bases)`
+                    : referenceValid
+                      ? "valid ACGT/FASTA reference"
+                      : `must be ACGT, at least ${boundedQueryLength} bases, and no more than ${MAX_INPUT_SEQUENCE_LENGTH.toLocaleString()}`}
                 </div>
               </div>
             )}
@@ -1039,7 +1219,14 @@ export function QuantumSearch() {
           {algorithmCards.map((item) => (
             <button
               key={item.value}
-              onClick={() => setAlgorithm(item.value)}
+              onClick={() => {
+                setAlgorithm(item.value);
+                if (item.value === "hybrid") {
+                  setQuerySource("pasted");
+                  setScope("pasted_sequence");
+                  setStrand("forward");
+                }
+              }}
               onDoubleClick={() => {
                 if (algorithm === item.value) setAlgorithm(null);
               }}
@@ -1117,49 +1304,54 @@ export function QuantumSearch() {
                 max={8192}
                 onLimitExceeded={showNumberLimitDialog}
               />
-              <LabelledNumber
-                label="Maximum query length"
-                value={maxQueryLength}
-                setValue={handleMaxQueryLengthChange}
-                min={1}
-                max={128}
-                onLimitExceeded={showNumberLimitDialog}
-              />
-              <LabelledNumber
-                label="Maximum reference records"
-                value={maxRecords}
-                setValue={setMaxRecords}
-                min={1}
-                max={100}
-                onLimitExceeded={showNumberLimitDialog}
-              />
-              <LabelledNumber
-                label="Maximum windows"
-                value={maxWindows}
-                setValue={setMaxWindows}
-                min={1}
-                max={512}
-                onLimitExceeded={showNumberLimitDialog}
-              />
-              <LabelledNumber
-                label="Window stride"
-                value={stride}
-                setValue={setStride}
-                min={1}
-                max={1000}
-                onLimitExceeded={showNumberLimitDialog}
-              />
-              <select
-                value={strand}
-                onChange={(event) => setStrand(event.target.value as "forward" | "both")}
-                className="theme-select rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm"
-              >
-                <option value="forward">Forward strand</option>
-                <option value="both">Both strands</option>
-              </select>
+              {algorithm !== "hybrid" && (
+                <>
+                  <LabelledNumber
+                    label="Quantum window length"
+                    value={maxQueryLength}
+                    setValue={handleMaxQueryLengthChange}
+                    min={1}
+                    max={128}
+                    onLimitExceeded={showNumberLimitDialog}
+                  />
+                  <LabelledNumber
+                    label="Maximum reference records"
+                    value={maxRecords}
+                    setValue={setMaxRecords}
+                    min={1}
+                    max={100}
+                    onLimitExceeded={showNumberLimitDialog}
+                  />
+                  <LabelledNumber
+                    label="Maximum windows"
+                    value={maxWindows}
+                    setValue={setMaxWindows}
+                    min={1}
+                    max={512}
+                    onLimitExceeded={showNumberLimitDialog}
+                  />
+                  <LabelledNumber
+                    label="Window stride"
+                    value={stride}
+                    setValue={setStride}
+                    min={1}
+                    max={1000}
+                    onLimitExceeded={showNumberLimitDialog}
+                  />
+                  <select
+                    value={strand}
+                    onChange={(event) => setStrand(event.target.value as "forward" | "both")}
+                    className="theme-select rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm"
+                  >
+                    <option value="forward">Forward strand</option>
+                    <option value="both">Both strands</option>
+                  </select>
+                </>
+              )}
               <div className="rounded-lg border border-white/10 bg-white/5 p-3 text-xs text-muted-foreground">
-                Mismatch threshold is fixed at 0 because the current Grover oracle supports exact
-                matching only.
+                {algorithm === "hybrid"
+                  ? "Hybrid runs one direct equal-length comparison and reports only amplified mutation positions."
+                  : "Mismatch threshold is fixed at 0 because the current Grover oracle supports exact matching only."}
               </div>
             </div>
           </Panel>
@@ -1168,12 +1360,25 @@ export function QuantumSearch() {
             {estimate ? (
               <>
                 <div className="grid grid-cols-2 gap-3 text-sm">
+                  <Metric label="Input query" value={estimate.inputQueryLength.toLocaleString()} />
+                  <Metric
+                    label="Quantum window"
+                    value={estimate.quantumWindowLength.toLocaleString()}
+                  />
                   <Metric label="Record cap" value={estimate.recordCount} />
                   <Metric label="Base cap" value={estimate.totalBases.toLocaleString()} />
                   <Metric label="Maximum runs" value={estimate.estimatedQuantumRuns} />
                   <Metric label="Maximum shots" value={estimate.estimatedShots.toLocaleString()} />
                   <Metric label="Qubits" value={estimate.estimatedLogicalQubits} />
                   <Metric label="Grover iter." value={estimate.estimatedGroverIterations} />
+                  <Metric
+                    label="Hardware fit"
+                    value={
+                      estimate.hardwareEligible
+                        ? `Eligible ≤ ${estimate.hardwareQubitCapacity} qubits`
+                        : "Not eligible"
+                    }
+                  />
                   <Metric
                     label="Simulation time"
                     value={formatEstimateRange(
@@ -1190,6 +1395,16 @@ export function QuantumSearch() {
                   />
                 </div>
                 <p className="mt-3 text-xs text-muted-foreground">{estimate.runtimeEstimateNote}</p>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  {estimate.hardwareEligibilityNote}
+                </p>
+                {estimate.inputTruncatedForQuantum && (
+                  <div className="mt-3 rounded-lg border border-cyan-glow/20 bg-cyan-glow/10 p-3 text-xs text-cyan-glow">
+                    The full input was accepted, but only the leading{" "}
+                    {estimate.quantumWindowLength.toLocaleString()} query bases are compiled into
+                    each bounded quantum circuit.
+                  </div>
+                )}
                 {estimate.exceedsSimulatorLimits && (
                   <div className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-300">
                     This request exceeds local simulator limits. Reduce the query/window length or
@@ -1223,7 +1438,9 @@ export function QuantumSearch() {
                       />
                     )}
                     <span className={active ? "text-foreground" : "text-muted-foreground"}>
-                      {step.label}
+                      {algorithm === "hybrid" && step.label === "Generating windows"
+                        ? "Preparing direct sequence comparison"
+                        : step.label}
                     </span>
                   </div>
                 );
@@ -1284,6 +1501,37 @@ export function QuantumSearch() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+        <Dialog open={hardwareConfirmOpen} onOpenChange={setHardwareConfirmOpen}>
+          <DialogContent className="border-cyan-glow/20 bg-background">
+            <DialogHeader>
+              <DialogTitle>Submit a real quantum-hardware run?</DialogTitle>
+              <DialogDescription className="space-y-2">
+                <span className="block">
+                  QDNA will build the selected algorithm&apos;s actual circuit, choose the smallest
+                  adequate online free/entitled QPU, and use queue depth to break equal-capacity
+                  ties.
+                </span>
+                <span className="block">
+                  This click prepares one representative bounded window and at most 1,024 shots. If
+                  qBraid fails, QDNA may make one IBM fallback submission, so one confirmation can
+                  consume up to two provider jobs. Results are raw hardware measurements without
+                  error mitigation.
+                </span>
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setHardwareConfirmOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                onClick={confirmHardwareRun}
+                className="bg-cyan-glow text-background hover:bg-cyan-glow/90"
+              >
+                Confirm Hardware Submission
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </main>
     </div>
   );
@@ -1317,24 +1565,69 @@ export function QuantumSearchResultsPage({ jobId }: { jobId: string }) {
         yLabel: "Shots or probability",
       };
     }
-    return {
-      data: Object.entries(values).map(([index, value]) => ({
+    const data = Object.entries(values)
+      .map(([index, value]) => ({
         index,
         value: Number(value),
-      })),
+      }))
+      .filter((item) => Number.isFinite(item.value))
+      .sort(
+        (left, right) =>
+          Number.parseInt(left.index, counts ? 2 : 10) -
+          Number.parseInt(right.index, counts ? 2 : 10),
+      );
+    return {
+      data,
       title: counts ? "Quantum measurement counts" : "Quantum index probabilities",
       xLabel: counts ? "Measured state bitstring" : "Candidate index",
       yLabel: counts ? "Shot count" : "Probability",
     };
   }, [result]);
 
+  const hybridMutationRows = useMemo(() => {
+    if (result?.algorithm !== "hybrid") return [];
+    const details = result.hits[0]?.quantumDetails;
+    const candidates = Array.isArray(details?.measuredCandidateIndices)
+      ? details.measuredCandidateIndices
+          .map((value) => Number(value))
+          .filter((value) => Number.isInteger(value) && value >= 0)
+      : [];
+    const probabilities = asRecord(details?.indexProbabilities);
+    const counts = asRecord(details?.counts);
+    const measuredStates = counts ? Object.keys(counts) : [];
+    const stateWidth =
+      measuredStates.length > 0
+        ? Math.max(...measuredStates.map((state) => state.replace(/\s/g, "").length))
+        : Math.max(1, Math.ceil(Math.log2(Math.max(2, result.query?.length ?? 2))));
+    const totalShots = counts
+      ? Object.values(counts).reduce((total, value) => total + (numberMetric(value) ?? 0), 0)
+      : 0;
+
+    return candidates
+      .map((position) => {
+        const measuredState = position.toString(2).padStart(stateWidth, "0");
+        const shotCount = numberMetric(counts?.[measuredState]) ?? 0;
+        const probability =
+          numberMetric(probabilities?.[String(position)]) ??
+          (totalShots > 0 ? shotCount / totalShots : 0);
+        return { position, measuredState, probability, shotCount };
+      })
+      .sort((left, right) => right.probability - left.probability || left.position - right.position)
+      .map((row, index) => ({ ...row, rank: index + 1 }));
+  }, [result]);
+
   const scoreChartData = useMemo(
     () =>
-      (result?.hits ?? []).map((hit) => ({
-        label: `${hit.rank}`,
-        score: Number(hit.quantumScore || 0),
-      })),
-    [result],
+      result?.algorithm === "hybrid"
+        ? hybridMutationRows.map((row) => ({
+            label: `${row.position}`,
+            score: row.probability,
+          }))
+        : (result?.hits ?? []).map((hit) => ({
+            label: `${hit.rank}`,
+            score: Number(hit.quantumScore || 0),
+          })),
+    [hybridMutationRows, result],
   );
 
   const validationChartData = useMemo(() => {
@@ -1360,6 +1653,50 @@ export function QuantumSearchResultsPage({ jobId }: { jobId: string }) {
       { label: "Quantum", seconds: quantumSeconds ?? 0 },
       { label: "Classical validation", seconds: validationSeconds ?? 0 },
     ];
+  }, [result]);
+
+  const circuitMetricsVisualization = useMemo(() => {
+    const details = result?.hits?.[0]?.quantumDetails;
+    const logical = asRecord(details?.circuitMetrics);
+    const transpiled = asRecord(details?.transpiledCircuitMetrics);
+    if (!logical && !transpiled) {
+      return {
+        data: [] as Array<{ label: string; logical: number | null; transpiled: number | null }>,
+        logicalQubits: null,
+        transpiledQubits: null,
+      };
+    }
+
+    const metric = (record: Record<string, unknown> | null, key: string) =>
+      record ? numberMetric(record[key]) : null;
+    const data = [
+      {
+        label: "Depth",
+        logical: metric(logical, "depth"),
+        transpiled: metric(transpiled, "depth"),
+      },
+      {
+        label: "Operations",
+        logical: metric(logical, "size"),
+        transpiled: metric(transpiled, "size"),
+      },
+      {
+        label: "1-qubit gates",
+        logical: metric(logical, "oneQubitGateCount"),
+        transpiled: metric(transpiled, "oneQubitGateCount"),
+      },
+      {
+        label: "2-qubit gates",
+        logical: metric(logical, "twoQubitGateCount"),
+        transpiled: metric(transpiled, "twoQubitGateCount"),
+      },
+    ].filter((item) => item.logical != null || item.transpiled != null);
+
+    return {
+      data,
+      logicalQubits: metric(logical, "logical_qubits"),
+      transpiledQubits: metric(transpiled, "logical_qubits"),
+    };
   }, [result]);
 
   const noiseChartData = useMemo(
@@ -1587,7 +1924,12 @@ export function QuantumSearchResultsPage({ jobId }: { jobId: string }) {
               <div className="grid gap-3 sm:grid-cols-6">
                 <Metric label="Algorithm" value={result.algorithm} />
                 <Metric label="Provider" value={result.retrieval.provider} />
-                <Metric label="Hits" value={result.hits.length} />
+                <Metric
+                  label={result.algorithm === "hybrid" ? "Mutations" : "Hits"}
+                  value={
+                    result.algorithm === "hybrid" ? hybridMutationRows.length : result.hits.length
+                  }
+                />
                 <Metric
                   label="Reference source"
                   value={result.reference?.source || result.retrieval.provider}
@@ -1613,16 +1955,15 @@ export function QuantumSearchResultsPage({ jobId }: { jobId: string }) {
                         {result.reference.sequencePreview || "-"}
                       </div>
                       <div className="mt-1 text-xs text-muted-foreground">
-                        First 10 bases of the top processed reference window
+                        {result.algorithm === "hybrid"
+                          ? "First 10 bases of the directly compared reference"
+                          : "First 10 bases of the top processed reference window"}
                       </div>
                     </div>
                     <div>
                       <div className="text-xs uppercase tracking-widest text-emerald">
-                        How the reference was taken
+                        Reference source
                       </div>
-                      <p className="mt-2 text-sm text-muted-foreground">
-                        {result.reference.selectionMethod}
-                      </p>
                       <p className="mt-2 font-mono text-xs text-emerald">
                         {result.reference.source}
                         {result.reference.accession ? ` • ${result.reference.accession}` : ""}
@@ -1740,34 +2081,23 @@ export function QuantumSearchResultsPage({ jobId }: { jobId: string }) {
                     )}
                     BLAST Truth Check
                   </Button>
-                  <Button
-                    onClick={handleValidateCandidates}
-                    disabled={validatingCandidates || result.hits.length === 0}
-                    variant="outline"
-                    className="rounded-full border-white/10 bg-white/5"
-                  >
-                    {validatingCandidates ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <CheckCircle2 className="h-4 w-4" />
-                    )}
-                    Validate Candidates
-                  </Button>
+                  {result.algorithm !== "hybrid" && (
+                    <Button
+                      onClick={handleValidateCandidates}
+                      disabled={validatingCandidates || result.hits.length === 0}
+                      variant="outline"
+                      className="rounded-full border-white/10 bg-white/5"
+                    >
+                      {validatingCandidates ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <CheckCircle2 className="h-4 w-4" />
+                      )}
+                      Validate Candidates
+                    </Button>
+                  )}
                 </div>
               </div>
-              {result.warnings.length > 0 && (
-                <div className="rounded-xl border border-yellow-400/20 bg-yellow-400/10 p-4">
-                  <div className="flex items-center gap-2 text-sm font-semibold text-yellow-100">
-                    <AlertTriangle className="h-4 w-4" />
-                    Search completed with warnings
-                  </div>
-                  <ul className="mt-2 space-y-1 text-xs text-yellow-100/90">
-                    {result.warnings.map((warning, index) => (
-                      <li key={`${index}-${warning}`}>• {warning}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
               {organismGroups.length > 0 && (
                 <div className="space-y-3">
                   <div>
@@ -1858,12 +2188,11 @@ export function QuantumSearchResultsPage({ jobId }: { jobId: string }) {
                   )}
                 </div>
               )}
-              {result.windowSelection && (
+              {result.algorithm !== "hybrid" && result.windowSelection && (
                 <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm">
                   <div className="text-xs uppercase tracking-widest text-emerald">
                     Window selection
                   </div>
-                  <p className="mt-2 text-muted-foreground">{result.windowSelection.description}</p>
                   <p className="mt-2 font-mono text-xs text-emerald">
                     processed {result.windowSelection.processedWindows} / accepted{" "}
                     {result.windowSelection.acceptedWindows} windows; stride{" "}
@@ -1873,47 +2202,85 @@ export function QuantumSearchResultsPage({ jobId }: { jobId: string }) {
                 </div>
               )}
               <div className="overflow-x-auto rounded-xl border border-white/10">
-                <table className="w-full min-w-[900px] text-left text-sm">
-                  <thead className="bg-white/5 text-xs uppercase tracking-wider text-muted-foreground">
-                    <tr>
-                      <th className="px-3 py-3">Rank</th>
-                      <th className="px-3 py-3">Accession</th>
-                      <th className="px-3 py-3">Strand</th>
-                      <th className="px-3 py-3">Coordinates</th>
-                      <th className="px-3 py-3">Quantum score</th>
-                      <th className="px-3 py-3">Validation</th>
-                      <th className="px-3 py-3">Window</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {result.hits.map((hit) => (
-                      <tr
-                        key={`${hit.rank}-${hit.accession}-${hit.start}`}
-                        className="border-t border-white/5"
-                      >
-                        <td className="px-3 py-3 font-mono text-emerald">{hit.rank}</td>
-                        <td className="px-3 py-3">{hit.accession}</td>
-                        <td className="px-3 py-3">{hit.strand}</td>
-                        <td className="px-3 py-3 font-mono">
-                          {hit.start}-{hit.end}
-                        </td>
-                        <td className="px-3 py-3 font-mono">
-                          {Number(hit.quantumScore).toFixed(4)}
-                        </td>
-                        <td className="px-3 py-3">
-                          {hit.classicalValidation
-                            ? hit.classicalValidation.matches
-                              ? "exact match"
-                              : "no exact match"
-                            : "not validated"}
-                        </td>
-                        <td className="px-3 py-3 font-mono text-xs text-muted-foreground">
-                          {hit.matchedWindow}
-                        </td>
+                {result.algorithm === "hybrid" ? (
+                  <table className="w-full min-w-[620px] text-left text-sm">
+                    <thead className="bg-white/5 text-xs uppercase tracking-wider text-muted-foreground">
+                      <tr>
+                        <th className="px-3 py-3">Rank</th>
+                        <th className="px-3 py-3">Mutation coordinate (zero-based)</th>
+                        <th className="px-3 py-3">Measured state</th>
+                        <th className="px-3 py-3">Measured probability</th>
+                        <th className="px-3 py-3">Shot count</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {hybridMutationRows.length > 0 ? (
+                        hybridMutationRows.map((row) => (
+                          <tr key={row.position} className="border-t border-white/5">
+                            <td className="px-3 py-3 font-mono text-emerald">{row.rank}</td>
+                            <td className="px-3 py-3 font-mono text-emerald">{row.position}</td>
+                            <td className="px-3 py-3 font-mono">{row.measuredState}</td>
+                            <td className="px-3 py-3 font-mono">
+                              {formatProbability(row.probability)}
+                            </td>
+                            <td className="px-3 py-3 font-mono">{row.shotCount}</td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr className="border-t border-white/5">
+                          <td
+                            colSpan={5}
+                            className="px-3 py-6 text-center text-sm text-muted-foreground"
+                          >
+                            No mutation positions were amplified above the measurement threshold.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                ) : (
+                  <table className="w-full min-w-[900px] text-left text-sm">
+                    <thead className="bg-white/5 text-xs uppercase tracking-wider text-muted-foreground">
+                      <tr>
+                        <th className="px-3 py-3">Rank</th>
+                        <th className="px-3 py-3">Accession</th>
+                        <th className="px-3 py-3">Strand</th>
+                        <th className="px-3 py-3">Coordinates</th>
+                        <th className="px-3 py-3">Quantum score</th>
+                        <th className="px-3 py-3">Validation</th>
+                        <th className="px-3 py-3">Window</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {result.hits.map((hit) => (
+                        <tr
+                          key={`${hit.rank}-${hit.accession}-${hit.start}`}
+                          className="border-t border-white/5"
+                        >
+                          <td className="px-3 py-3 font-mono text-emerald">{hit.rank}</td>
+                          <td className="px-3 py-3">{hit.accession}</td>
+                          <td className="px-3 py-3">{hit.strand}</td>
+                          <td className="px-3 py-3 font-mono">
+                            {hit.start}-{hit.end}
+                          </td>
+                          <td className="px-3 py-3 font-mono">
+                            {Number(hit.quantumScore).toFixed(4)}
+                          </td>
+                          <td className="px-3 py-3">
+                            {hit.classicalValidation
+                              ? hit.classicalValidation.matches
+                                ? "exact match"
+                                : "no exact match"
+                              : "not validated"}
+                          </td>
+                          <td className="px-3 py-3 font-mono text-xs text-muted-foreground">
+                            {hit.matchedWindow}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
               </div>
               {distributionChart.data.length > 0 && (
                 <div className="rounded-xl border border-white/10 bg-black/30 p-4">
@@ -1972,10 +2339,18 @@ export function QuantumSearchResultsPage({ jobId }: { jobId: string }) {
                   </div>
                 </div>
               )}
-              <div className="grid gap-4 lg:grid-cols-3">
+              <div className="grid gap-4 lg:grid-cols-2">
                 <VisualizationCard
-                  title="Quantum score ranking"
-                  description="Compares every returned window by quantum score after bounded window processing."
+                  title={
+                    result.algorithm === "hybrid"
+                      ? "Mutation-position hit distribution"
+                      : "Quantum score ranking"
+                  }
+                  description={
+                    result.algorithm === "hybrid"
+                      ? "Shows the measured probability for each mutation position amplified by the Hybrid circuit."
+                      : "Compares every returned window by quantum score after bounded window processing."
+                  }
                 >
                   <ResponsiveContainer>
                     <BarChart
@@ -1987,7 +2362,10 @@ export function QuantumSearchResultsPage({ jobId }: { jobId: string }) {
                         dataKey="label"
                         tick={{ fill: "#94a3b8", fontSize: 10 }}
                         label={{
-                          value: "Hit rank",
+                          value:
+                            result.algorithm === "hybrid"
+                              ? "Mutation coordinate (zero-based)"
+                              : "Hit rank",
                           position: "insideBottom",
                           offset: -18,
                           fill: "#94a3b8",
@@ -1997,7 +2375,10 @@ export function QuantumSearchResultsPage({ jobId }: { jobId: string }) {
                       <YAxis
                         tick={{ fill: "#94a3b8", fontSize: 10 }}
                         label={{
-                          value: "Quantum score",
+                          value:
+                            result.algorithm === "hybrid"
+                              ? "Measured probability"
+                              : "Quantum score",
                           angle: -90,
                           position: "insideLeft",
                           fill: "#94a3b8",
@@ -2016,66 +2397,125 @@ export function QuantumSearchResultsPage({ jobId }: { jobId: string }) {
                     </BarChart>
                   </ResponsiveContainer>
                 </VisualizationCard>
-                <VisualizationCard
-                  title="Validation breakdown"
-                  description="Shows how many returned windows became exact matches after classical validation."
-                >
-                  <ResponsiveContainer>
-                    <BarChart
-                      data={validationChartData}
-                      margin={{ top: 8, right: 12, bottom: 28, left: 0 }}
+                {result.algorithm !== "hybrid" && (
+                  <>
+                    <VisualizationCard
+                      title="Validation breakdown"
+                      description="Shows how many returned windows became exact matches after classical validation."
                     >
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-                      <XAxis
-                        dataKey="label"
-                        tick={{ fill: "#94a3b8", fontSize: 10 }}
-                        label={{
-                          value: "Validation state",
-                          position: "insideBottom",
-                          offset: -18,
-                          fill: "#94a3b8",
-                          fontSize: 10,
-                        }}
-                      />
-                      <YAxis
-                        allowDecimals={false}
-                        tick={{ fill: "#94a3b8", fontSize: 10 }}
-                        label={{
-                          value: "Window count",
-                          angle: -90,
-                          position: "insideLeft",
-                          fill: "#94a3b8",
-                          fontSize: 10,
-                        }}
-                      />
-                      <Tooltip
-                        contentStyle={{
-                          background: "#0b1a15",
-                          border: "1px solid rgba(16,185,129,0.3)",
-                          borderRadius: 12,
-                          fontSize: 12,
-                        }}
-                      />
-                      <Bar dataKey="count" fill="#10B981" radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </VisualizationCard>
+                      <ResponsiveContainer>
+                        <BarChart
+                          data={validationChartData}
+                          margin={{ top: 8, right: 12, bottom: 28, left: 0 }}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+                          <XAxis
+                            dataKey="label"
+                            tick={{ fill: "#94a3b8", fontSize: 10 }}
+                            label={{
+                              value: "Validation state",
+                              position: "insideBottom",
+                              offset: -18,
+                              fill: "#94a3b8",
+                              fontSize: 10,
+                            }}
+                          />
+                          <YAxis
+                            allowDecimals={false}
+                            tick={{ fill: "#94a3b8", fontSize: 10 }}
+                            label={{
+                              value: "Window count",
+                              angle: -90,
+                              position: "insideLeft",
+                              fill: "#94a3b8",
+                              fontSize: 10,
+                            }}
+                          />
+                          <Tooltip
+                            contentStyle={{
+                              background: "#0b1a15",
+                              border: "1px solid rgba(16,185,129,0.3)",
+                              borderRadius: 12,
+                              fontSize: 12,
+                            }}
+                          />
+                          <Bar dataKey="count" fill="#10B981" radius={[4, 4, 0, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </VisualizationCard>
+                    <VisualizationCard
+                      title="Execution time comparison"
+                      description="Appears after candidate validation and compares quantum simulation time with classical validation time."
+                    >
+                      {timingChartData.length > 0 ? (
+                        <ResponsiveContainer>
+                          <BarChart
+                            data={timingChartData}
+                            margin={{ top: 8, right: 12, bottom: 28, left: 0 }}
+                          >
+                            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+                            <XAxis
+                              dataKey="label"
+                              tick={{ fill: "#94a3b8", fontSize: 10 }}
+                              label={{
+                                value: "Execution stage",
+                                position: "insideBottom",
+                                offset: -18,
+                                fill: "#94a3b8",
+                                fontSize: 10,
+                              }}
+                            />
+                            <YAxis
+                              tick={{ fill: "#94a3b8", fontSize: 10 }}
+                              label={{
+                                value: "Seconds",
+                                angle: -90,
+                                position: "insideLeft",
+                                fill: "#94a3b8",
+                                fontSize: 10,
+                              }}
+                            />
+                            <Tooltip
+                              formatter={(value) => [`${Number(value).toFixed(4)} s`, "Time"]}
+                              contentStyle={{
+                                background: "#0b1a15",
+                                border: "1px solid rgba(16,185,129,0.3)",
+                                borderRadius: 12,
+                                fontSize: 12,
+                              }}
+                            />
+                            <Bar dataKey="seconds" fill="#fbbf24" radius={[4, 4, 0, 0]} />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      ) : (
+                        <div className="flex h-full items-center justify-center px-4 text-center text-xs text-muted-foreground">
+                          Click Validate Candidates to record classical validation time.
+                        </div>
+                      )}
+                    </VisualizationCard>
+                  </>
+                )}
                 <VisualizationCard
-                  title="Execution time comparison"
-                  description="Appears after candidate validation and compares quantum simulation time with classical validation time."
+                  title="Circuit metrics"
+                  description={
+                    circuitMetricsVisualization.data.length > 0
+                      ? `Top-ranked bounded window; logical qubits: ${circuitMetricsVisualization.logicalQubits ?? "n/a"}, Aer-transpiled qubits: ${circuitMetricsVisualization.transpiledQubits ?? "n/a"}.`
+                      : "The completed result does not contain circuit metrics for its top-ranked window."
+                  }
                 >
-                  {timingChartData.length > 0 ? (
+                  {circuitMetricsVisualization.data.length > 0 ? (
                     <ResponsiveContainer>
                       <BarChart
-                        data={timingChartData}
+                        data={circuitMetricsVisualization.data}
                         margin={{ top: 8, right: 12, bottom: 28, left: 0 }}
                       >
                         <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
                         <XAxis
                           dataKey="label"
-                          tick={{ fill: "#94a3b8", fontSize: 10 }}
+                          interval={0}
+                          tick={{ fill: "#94a3b8", fontSize: 9 }}
                           label={{
-                            value: "Execution stage",
+                            value: "Circuit metric",
                             position: "insideBottom",
                             offset: -18,
                             fill: "#94a3b8",
@@ -2083,9 +2523,10 @@ export function QuantumSearchResultsPage({ jobId }: { jobId: string }) {
                           }}
                         />
                         <YAxis
+                          allowDecimals={false}
                           tick={{ fill: "#94a3b8", fontSize: 10 }}
                           label={{
-                            value: "Seconds",
+                            value: "Count",
                             angle: -90,
                             position: "insideLeft",
                             fill: "#94a3b8",
@@ -2093,7 +2534,10 @@ export function QuantumSearchResultsPage({ jobId }: { jobId: string }) {
                           }}
                         />
                         <Tooltip
-                          formatter={(value) => [`${Number(value).toFixed(4)} s`, "Time"]}
+                          formatter={(value, name) => [
+                            Number(value).toLocaleString(),
+                            name === "logical" ? "Logical" : "Aer transpiled",
+                          ]}
                           contentStyle={{
                             background: "#0b1a15",
                             border: "1px solid rgba(16,185,129,0.3)",
@@ -2101,12 +2545,19 @@ export function QuantumSearchResultsPage({ jobId }: { jobId: string }) {
                             fontSize: 12,
                           }}
                         />
-                        <Bar dataKey="seconds" fill="#fbbf24" radius={[4, 4, 0, 0]} />
+                        <Legend
+                          formatter={(value) =>
+                            value === "logical" ? "Logical" : "Aer transpiled"
+                          }
+                          wrapperStyle={{ fontSize: 10 }}
+                        />
+                        <Bar dataKey="logical" fill="#22d3ee" radius={[4, 4, 0, 0]} />
+                        <Bar dataKey="transpiled" fill="#10B981" radius={[4, 4, 0, 0]} />
                       </BarChart>
                     </ResponsiveContainer>
                   ) : (
                     <div className="flex h-full items-center justify-center px-4 text-center text-xs text-muted-foreground">
-                      Click Validate Candidates to record classical validation time.
+                      Run a new quantum search to generate circuit metrics.
                     </div>
                   )}
                 </VisualizationCard>
@@ -2124,12 +2575,14 @@ export function QuantumSearchResultsPage({ jobId }: { jobId: string }) {
                   data={toCsv(result)}
                   filename="quantum-search-hits.csv"
                 />
-                <DownloadButton
-                  label="FASTA"
-                  icon={Dna}
-                  data={toFasta(result)}
-                  filename="quantum-search-windows.fasta"
-                />
+                {result.algorithm !== "hybrid" && (
+                  <DownloadButton
+                    label="FASTA"
+                    icon={Dna}
+                    data={toFasta(result)}
+                    filename="quantum-search-windows.fasta"
+                  />
+                )}
               </div>
             </div>
           ) : (
@@ -2142,17 +2595,20 @@ export function QuantumSearchResultsPage({ jobId }: { jobId: string }) {
           )}
         </Panel>
 
-        <Panel title="Methodology" eyebrow="Scientific boundaries" icon={AlertTriangle}>
+        <Panel eyebrow="Scientific boundaries" icon={AlertTriangle}>
           <div className="grid gap-3 text-sm text-muted-foreground md:grid-cols-2">
             <p>
-              NCBI performs genomic sequence discovery and retrieval; the selected quantum circuit
-              processes bounded ACGT windows only.
+              {result?.algorithm === "hybrid"
+                ? "Hybrid compiles the two pasted A/C/G/T sequences into one bounded direct-comparison circuit."
+                : "NCBI performs genomic sequence discovery and retrieval; the selected quantum circuit processes bounded ACGT windows only."}
             </p>
-            <p>
-              Classical validation is available after the quantum result is generated and runs only
-              when the user requests candidate validation.
-            </p>
-            <p>The complete GenBank database is not loaded into a quantum circuit.</p>
+            {result?.algorithm === "hybrid" && (
+              <p>
+                Hybrid mutation coordinates come from amplified measured candidate states; the UI
+                does not classically scan the two strings for mismatch positions.
+              </p>
+            )}
+            {/* <p>The complete GenBank database is not loaded into a quantum circuit.</p> */}
             <p>
               Simulator execution is not equivalent to execution on fault-tolerant quantum hardware.
             </p>
@@ -2270,6 +2726,19 @@ export function QuantumSearchResultsPage({ jobId }: { jobId: string }) {
             </div>
           </Panel>
         )}
+        {result && result.warnings.length > 0 && (
+          <div className="rounded-xl border border-yellow-400/20 bg-yellow-400/10 p-4">
+            <div className="flex items-center gap-2 text-sm font-semibold text-yellow-100">
+              <AlertTriangle className="h-4 w-4" />
+              Search completed with warnings
+            </div>
+            <ul className="mt-2 space-y-1 text-xs text-yellow-100/90">
+              {result.warnings.map((warning, index) => (
+                <li key={`${index}-${warning}`}>• {warning}</li>
+              ))}
+            </ul>
+          </div>
+        )}
       </main>
     </div>
   );
@@ -2324,6 +2793,10 @@ function VisualizationCard({
       <div className="mt-3 h-52">{children}</div>
     </div>
   );
+}
+
+function normalizeDnaInput(value: string) {
+  return value.replace(/^>.*$/gm, "").replace(/\s/g, "").toUpperCase();
 }
 
 function formatApiError(body: unknown, fallback: string) {
@@ -2512,6 +2985,34 @@ function splitList(value: string) {
 }
 
 function toCsv(result: SearchResult) {
+  if (result.algorithm === "hybrid") {
+    const details = result.hits[0]?.quantumDetails;
+    const candidates = Array.isArray(details?.measuredCandidateIndices)
+      ? details.measuredCandidateIndices.map((value) => Number(value))
+      : [];
+    const probabilities = asRecord(details?.indexProbabilities);
+    const counts = asRecord(details?.counts);
+    const stateWidth = counts
+      ? Math.max(1, ...Object.keys(counts).map((state) => state.replace(/\s/g, "").length))
+      : Math.max(1, Math.ceil(Math.log2(Math.max(2, result.query?.length ?? 2))));
+    const rows = ["rank,mutationCoordinateZeroBased,measuredState,measuredProbability,shotCount"];
+    candidates
+      .filter((position) => Number.isInteger(position) && position >= 0)
+      .sort((left, right) => left - right)
+      .forEach((position, index) => {
+        const measuredState = position.toString(2).padStart(stateWidth, "0");
+        rows.push(
+          [
+            index + 1,
+            position,
+            measuredState,
+            numberMetric(probabilities?.[String(position)]) ?? 0,
+            numberMetric(counts?.[measuredState]) ?? 0,
+          ].join(","),
+        );
+      });
+    return rows.join("\n");
+  }
   const rows = ["rank,accession,strand,start,end,algorithm,quantumScore,matchedWindow"];
   result.hits.forEach((hit) => {
     rows.push(

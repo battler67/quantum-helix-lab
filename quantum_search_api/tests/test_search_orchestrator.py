@@ -85,6 +85,95 @@ def test_estimate_local_fixture_has_algorithm_labeling():
     assert estimate.estimated_end_to_end_seconds_max >= estimate.estimated_simulation_seconds_max
 
 
+def test_estimate_accepts_long_fasta_inputs_and_uses_bounded_frqi_window():
+    sequence = "ACGT" * 25_000
+    orchestrator = SearchOrchestrator(
+        datasets_provider=DummyDatasetsProvider(),
+        entrez_provider=DummyEntrezProvider(),
+    )
+    request = SearchRequest(
+        querySource="pasted",
+        querySequence=f">query length=100000 seed=42\n{sequence}",
+        referenceSequence=f">reference_sequence length=100000 seed=42\n{sequence}",
+        algorithm="frqi",
+        databaseScope="pasted_sequence",
+        maxQueryLength=32,
+        maxBasesPerRecord=100_000,
+        maxTotalBases=100_000,
+        maxWindows=1,
+        shots=138,
+        strand="forward",
+    )
+
+    estimate = orchestrator.estimate(request)
+
+    assert estimate.input_query_length == 100_000
+    assert estimate.quantum_window_length == 32
+    assert estimate.input_truncated_for_quantum is True
+    assert estimate.sampling_or_truncation is True
+    assert estimate.estimated_logical_qubits == 7
+    assert estimate.exceeds_simulator_limits is False
+    assert estimate.hardware_eligible is True
+    assert estimate.hardware_qubit_capacity == 156
+    assert any("not a coherent comparison" in warning for warning in estimate.warnings)
+
+
+def test_long_input_grover_hardware_button_is_gated_by_bounded_circuit_estimate():
+    sequence = "ACGT" * 25_000
+    orchestrator = SearchOrchestrator(
+        datasets_provider=DummyDatasetsProvider(),
+        entrez_provider=DummyEntrezProvider(),
+    )
+    request = SearchRequest(
+        querySource="pasted",
+        querySequence=sequence,
+        referenceSequence=sequence,
+        algorithm="grover",
+        databaseScope="pasted_sequence",
+        maxQueryLength=32,
+        maxBasesPerRecord=100_000,
+        maxTotalBases=100_000,
+        maxWindows=1,
+        shots=138,
+        strand="forward",
+    )
+
+    estimate = orchestrator.estimate(request)
+
+    assert estimate.input_query_length == 100_000
+    assert estimate.quantum_window_length == 32
+    assert estimate.estimated_logical_qubits == 197
+    assert estimate.exceeds_simulator_limits is True
+    assert estimate.hardware_eligible is False
+
+
+def test_hybrid_direct_pair_is_eligible_at_its_thirty_two_base_limit():
+    sequence = "ACGT" * 8
+    orchestrator = SearchOrchestrator(
+        datasets_provider=DummyDatasetsProvider(),
+        entrez_provider=DummyEntrezProvider(),
+    )
+    request = SearchRequest(
+        querySource="pasted",
+        querySequence=sequence,
+        referenceSequence=sequence,
+        algorithm="hybrid",
+        databaseScope="pasted_sequence",
+        maxQueryLength=32,
+        maxWindows=1,
+        shots=138,
+        strand="forward",
+    )
+
+    estimate = orchestrator.estimate(request)
+
+    assert estimate.input_query_length == 32
+    assert estimate.quantum_window_length == 32
+    assert estimate.estimated_logical_qubits == 12
+    assert estimate.exceeds_simulator_limits is False
+    assert estimate.hardware_eligible is True
+
+
 def test_remote_estimate_does_not_call_ncbi_providers():
     datasets = DummyDatasetsProvider()
     orchestrator = SearchOrchestrator(
@@ -240,20 +329,35 @@ def test_hybrid_adapter_invocation_through_orchestrator():
     request = SearchRequest(
         querySource="pasted",
         querySequence="AAAA",
+        referenceSequence="AAAT",
         algorithm="hybrid",
-        databaseScope="uploaded_fasta",
-        uploadedFasta=">demo\nAAAT\n",
-        maxWindows=1,
+        databaseScope="pasted_sequence",
+        maxWindows=8,
         shots=1024,
         strand="forward",
     )
     estimate = orchestrator.estimate(request)
     assert estimate.estimated_grover_iterations == 2
+    assert estimate.estimated_quantum_runs == 1
     result = orchestrator.run(request, job_id="hybrid")
     details = result["hits"][0]["quantumDetails"]
     assert result["algorithm"] == "hybrid"
+    assert "windowSelection" not in result
+    assert result["quantumMetrics"]["windowsProcessed"] == 0
+    assert result["quantumMetrics"]["sequenceComparisons"] == 1
     assert details["measuredCandidateIndices"] == [3]
     assert details["mismatchCountUsedForSchedule"] is False
+
+
+def test_hybrid_request_requires_equal_length_pasted_sequences():
+    with pytest.raises(ValueError, match="equal-length"):
+        SearchRequest(
+            querySource="pasted",
+            querySequence="AAAA",
+            referenceSequence="AAA",
+            algorithm="hybrid",
+            databaseScope="pasted_sequence",
+        )
 
 
 def test_grover_rejects_oversized_simulator_request():

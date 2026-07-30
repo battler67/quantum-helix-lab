@@ -6,4 +6,6 @@ pytest>=9
 python-dotenv>=1.2
 qiskit>=2.5,<3
 qiskit-aer>=0.17,<1
+qiskit-ibm-runtime>=0.46,<1
+qbraid>=0.12,<1
 matplotlib>=3.10

@@ -11,6 +11,8 @@ from quantum_search_api.services.ncbi.entrez_workflow import NcbiEntrezWorkflow
 from quantum_search_api.services.ncbi.entrez_provider import NcbiEntrezProvider
 from quantum_search_api.services.ncbi.exceptions import NcbiError, NcbiUnavailableError, NcbiValidationError
 from quantum_search_api.services.ncbi.models import SearchRequest
+from quantum_search_api.services.hardware import HardwareJobService, HardwareSubmissionRequest
+from quantum_search_api.services.hardware.providers import HardwareProviderError
 from quantum_search_api.services.noise.config import NoiseSettings
 from quantum_search_api.services.search.job_service import InMemoryJobService
 from quantum_search_api.services.search.search_orchestrator import SearchOrchestrator
@@ -34,6 +36,7 @@ app.add_middleware(
 
 orchestrator = SearchOrchestrator()
 jobs = InMemoryJobService(orchestrator)
+hardware_jobs = HardwareJobService()
 entrez_workflow = NcbiEntrezWorkflow()
 
 
@@ -120,6 +123,45 @@ def cancel_job(job_id: str) -> dict:
     if not jobs.cancel_job(job_id):
         raise HTTPException(status_code=404, detail="Job not found")
     return {"jobId": job_id, "status": "cancelled"}
+
+
+@app.post("/api/quantum-search/hardware/preview")
+def preview_hardware(request: SearchRequest) -> dict:
+    """Discover a best-fit device without submitting a provider job."""
+
+    try:
+        return hardware_jobs.preview(request)
+    except (ValueError, NcbiError, HardwareProviderError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/quantum-search/hardware/jobs")
+def create_hardware_job(request: HardwareSubmissionRequest) -> dict:
+    """Queue one explicitly confirmed representative-window QPU submission."""
+
+    try:
+        job = hardware_jobs.create_job(request)
+        return job.to_dict()
+    except (ValueError, NcbiError, HardwareProviderError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/quantum-search/hardware/jobs/{job_id}")
+def get_hardware_job(job_id: str) -> dict:
+    job = hardware_jobs.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Hardware job not found")
+    return job.to_dict()
+
+
+@app.get("/api/quantum-search/hardware/jobs/{job_id}/results")
+def get_hardware_results(job_id: str) -> dict:
+    job = hardware_jobs.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Hardware job not found")
+    if job.status != "completed" or job.result is None:
+        raise HTTPException(status_code=409, detail=f"Hardware job is {job.status}")
+    return job.result
 
 
 @app.get("/api/ncbi/search")

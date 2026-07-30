@@ -186,6 +186,18 @@ External NCBI calls are mocked in automated tests.
 
 ## Scientific Limitations
 
+- The portal accepts up to 100,000 A/C/G/T bases for pasted or FASTA-formatted
+  query and reference inputs. `maxQueryLength` remains the bounded quantum
+  window length and is limited to 128 bases.
+- When a query is longer than the configured quantum window, only its leading
+  bounded window is compiled into each circuit. The reference is scanned using
+  the existing `maxWindows`, stride, strand, and base caps.
+- Estimate reports the full input length, bounded quantum window length,
+  truncation status, and separate Aer and 156-qubit hardware eligibility.
+  Live device discovery and transpilation remain authoritative.
+- Long-input support does not coherently encode or compare both complete
+  100,000-base strings in one circuit. Grover/QGSA can remain ineligible
+  because its bounded circuit is qubit-heavy.
 - This is nucleotide sequence search and similarity analysis, not DNA sequencing.
 - It is not a complete BLAST clone and does not compute BLAST E-values or gapped local alignments.
 - FRQI scores are angle-overlap similarity scores, not percent identity.
