@@ -29,8 +29,10 @@ downloaded dependencies, credentials, build folders, or generated experiment out
 - Bun 1.3
 - Internet access for the initial dependency installation and NCBI-backed searches
 
-The portal uses local Qiskit Aer simulation. IBM hardware submission is not part of
-the web workflow.
+The default portal workflow uses local Qiskit Aer simulation. An explicit,
+confirmation-gated real-hardware path can submit one representative bounded
+window to a resource-matched qBraid or IBM QPU when backend-only credentials
+are configured.
 
 ## Windows quick start
 
@@ -126,11 +128,14 @@ Optional standalone suites:
 - NCBI Entrez genomic record search and record details
 - Taxonomy and organism views
 - Pasted, uploaded FASTA, accession, assembly, organism, and taxonomy search inputs
+- Pasted and FASTA query/reference inputs up to 100,000 bases with explicitly
+  bounded quantum windows
 - Metadata-only resource estimation
 - Bounded reference retrieval with partial-result handling
 - Forward and reverse-complement reference windows
 - FRQI similarity, Grover exact matching, and hybrid fixed-point processing
 - On-demand configurable noise comparisons
+- Quota-safe qBraid/IBM real-hardware execution with best-fit device mapping
 - Optional classical candidate validation and BLAST checks
 
 NCBI content and response times depend on the external NCBI services. Quantum circuit
@@ -143,11 +148,13 @@ size is deliberately bounded for local simulation.
 - Each collaborator should use their own NCBI contact email and API key.
 - Generated experiment artifacts are written under package `outputs/` directories,
   which are ignored by Git.
+- Real-hardware credentials belong only in `quantum_search_api/.env`; see
+  [`docs/REAL_HARDWARE_EXECUTION.md`](docs/REAL_HARDWARE_EXECUTION.md).
 
 ## Development notes
 
 - Run backend commands from the repository root so sibling packages resolve correctly.
 - The frontend defaults to `http://127.0.0.1:8000` for the API.
 - Search jobs are currently stored in backend memory; restarting FastAPI clears them.
-- Optional IBM Runtime helpers exist under `quantum_dna`, but real hardware submission
-  requires separate credentials, dependencies, and explicit confirmation.
+- Real hardware requires separate provider credentials and explicit confirmation.
+  Automated tests never submit provider jobs.

@@ -18,16 +18,25 @@ from quantum_search_api.services.ncbi.models import (
     SearchEstimate,
     SearchRequest,
     SequenceRecord,
+    WindowRecord,
 )
 from quantum_search_api.services.quantum.base import QuantumRunOptions
 from quantum_search_api.services.quantum.frqi_adapter import FrqiSearchEngine
 from quantum_search_api.services.quantum.grover_adapter import MAX_AER_QUBITS, GroverSearchEngine
-from quantum_search_api.services.quantum.hybrid_search import HybridQuantumSearchEngine
+from quantum_search_api.services.quantum.hybrid_search import (
+    MAX_HYBRID_LENGTH,
+    HybridQuantumSearchEngine,
+)
 from quantum_search_api.services.quantum.result_mapper import map_hit, result_shell
 from quantum_search_api.services.search.local_providers import PastedSequenceProvider, UploadedFastaProvider
 from quantum_search_api.services.search.ranking_service import rank_hits
 from quantum_search_api.services.search.validation_service import validate_exact, validate_hit_against_records
-from quantum_search_api.services.sequence.normalizer import normalize_query_input
+from quantum_search_api.services.sequence.normalizer import (
+    MAX_INPUT_SEQUENCE_LENGTH,
+    NormalizedSequence,
+    bound_normalized_sequence,
+    normalize_query_input,
+)
 from quantum_search_api.services.sequence.window_generator import generate_windows
 
 
@@ -36,6 +45,7 @@ LARGE_SCOPE_WARNING = (
     "The entire GenBank database is not loaded into the quantum circuit."
 )
 MAX_CONSECUTIVE_NCBI_FAILURES = 3
+HARDWARE_ESTIMATE_QUBIT_CAPACITY = 156
 
 
 class SearchOrchestrator:
@@ -61,7 +71,9 @@ class SearchOrchestrator:
         return self.frqi
 
     def estimate(self, request: SearchRequest) -> SearchEstimate:
-        query_length, query_warning = self._estimate_query_length(request)
+        query_length, input_query_length, query_warning = (
+            self._estimate_query_length(request)
+        )
         engine = self._engine(request.algorithm)
         resource = (
             self.grover.estimate_resources(
@@ -72,28 +84,60 @@ class SearchOrchestrator:
             if request.algorithm == Algorithm.grover
             else engine.estimate_resources(query_length, query_length)
         )
-        record_cap = request.max_records
-        base_cap = min(
-            request.max_total_bases,
-            request.max_records * request.max_bases_per_record,
+        direct_hybrid = request.algorithm == Algorithm.hybrid
+        record_cap = 1 if direct_hybrid else request.max_records
+        base_cap = (
+            query_length
+            if direct_hybrid
+            else min(
+                request.max_total_bases,
+                request.max_records * request.max_bases_per_record,
+            )
         )
-        run_cap = request.max_windows
+        run_cap = 1 if direct_hybrid else request.max_windows
         warnings = [
-            "Metadata-only estimate: no NCBI records or genomic FASTA files were fetched. "
-            "Record, base, window, run, and shot values are configured upper bounds."
+            (
+                "Hybrid compares the pasted equal-length query and reference directly in one "
+                "quantum circuit; sliding windows are not generated."
+                if direct_hybrid
+                else "Metadata-only estimate: no NCBI records or genomic FASTA files were fetched. "
+                "Record, base, window, run, and shot values are configured upper bounds."
+            )
         ]
         if query_warning:
             warnings.append(query_warning)
         if request.max_records > 10 or request.max_total_bases > 50000:
             warnings.append(LARGE_SCOPE_WARNING)
+        algorithm_length_supported = not (
+            request.algorithm == Algorithm.hybrid
+            and query_length > MAX_HYBRID_LENGTH
+        )
         exceeds = (
             request.algorithm == Algorithm.grover
             and resource["estimatedLogicalQubits"] > MAX_AER_QUBITS
+        ) or not algorithm_length_supported
+        hardware_eligible = (
+            resource["estimatedLogicalQubits"]
+            <= HARDWARE_ESTIMATE_QUBIT_CAPACITY
+            and algorithm_length_supported
         )
-        if request.algorithm == Algorithm.grover and resource["estimatedLogicalQubits"] > MAX_AER_QUBITS:
+        if (
+            request.algorithm == Algorithm.grover
+            and resource["estimatedLogicalQubits"] > MAX_AER_QUBITS
+        ):
             warnings.append(
                 "Grover/QGSA exact-pattern search exceeds the local Aer simulator qubit limit. "
                 "Use a shorter query/window or select FRQI similarity."
+            )
+        if not algorithm_length_supported:
+            warnings.append(
+                f"Hybrid circuits support at most {MAX_HYBRID_LENGTH} bases. "
+                "Reduce the quantum window length before execution."
+            )
+        if not hardware_eligible:
+            warnings.append(
+                "The bounded circuit is not eligible for the 156-qubit hardware "
+                "planning capacity. Live device discovery remains authoritative."
             )
         runtime = self._estimate_runtime(
             request,
@@ -102,6 +146,9 @@ class SearchOrchestrator:
             grover_iterations=int(resource["estimatedGroverIterations"]),
         )
         return SearchEstimate(
+            inputQueryLength=input_query_length,
+            quantumWindowLength=query_length,
+            inputTruncatedForQuantum=input_query_length > query_length,
             recordCount=record_cap,
             totalBases=base_cap,
             totalWindows=run_cap,
@@ -115,7 +162,18 @@ class SearchOrchestrator:
             if request.algorithm in {Algorithm.grover, Algorithm.hybrid}
             else 0,
             exceedsSimulatorLimits=exceeds,
-            samplingOrTruncation=False,
+            hardwareEligible=hardware_eligible,
+            hardwareQubitCapacity=HARDWARE_ESTIMATE_QUBIT_CAPACITY,
+            hardwareEligibilityNote=(
+                "Eligible by logical-qubit count and algorithm window limits. "
+                "Live provider access, topology, depth, and transpilation remain authoritative."
+                if hardware_eligible
+                else (
+                    "Ineligible by logical-qubit count or algorithm window limit. "
+                    "Reduce the quantum window length or choose another algorithm."
+                )
+            ),
+            samplingOrTruncation=input_query_length > query_length,
             warnings=warnings,
             estimatedSimulationSecondsMin=runtime["simulation_min"],
             estimatedSimulationSecondsMax=runtime["simulation_max"],
@@ -127,19 +185,52 @@ class SearchOrchestrator:
             ),
         )
 
-    def _estimate_query_length(self, request: SearchRequest) -> tuple[int, str | None]:
+    def _estimate_query_length(
+        self,
+        request: SearchRequest,
+    ) -> tuple[int, int, str | None]:
         if request.query_source.value == "ncbi_accession":
             return (
+                request.max_query_length,
                 request.max_query_length,
                 "The NCBI query accession was not fetched; resource calculations use "
                 f"the configured maximum query length of {request.max_query_length}.",
             )
-        query = normalize_query_input(
+        query, full_query = self._normalize_bounded_query(request)
+        warning = self._bounded_query_warning(full_query.length, query.length)
+        return query.length, full_query.length, warning
+
+    def _normalize_bounded_query(
+        self,
+        request: SearchRequest,
+    ) -> tuple[NormalizedSequence, NormalizedSequence]:
+        full_query = normalize_query_input(
             self._query_text(request),
             is_fasta=request.query_source.value == "uploaded_fasta",
-            max_length=request.max_query_length,
+            max_length=MAX_INPUT_SEQUENCE_LENGTH,
         )
-        return query.length, None
+        if request.algorithm == Algorithm.hybrid:
+            return full_query, full_query
+        return (
+            bound_normalized_sequence(
+                full_query,
+                max_length=request.max_query_length,
+            ),
+            full_query,
+        )
+
+    @staticmethod
+    def _bounded_query_warning(
+        input_length: int,
+        quantum_length: int,
+    ) -> str | None:
+        if input_length <= quantum_length:
+            return None
+        return (
+            f"The input query contains {input_length} bases; only the leading "
+            f"{quantum_length}-base bounded window is compiled into each quantum "
+            "circuit. This is not a coherent comparison of the complete input query."
+        )
 
     def _estimate_runtime(
         self,
@@ -208,22 +299,46 @@ class SearchOrchestrator:
             progress_callback=report,
         )
         report("preprocessing", "Normalizing query and genomic sequences", 25)
-        query = normalize_query_input(
-            self._query_text(request),
-            is_fasta=request.query_source.value == "uploaded_fasta",
-            max_length=request.max_query_length,
+        query, full_query = self._normalize_bounded_query(request)
+        direct_hybrid = request.algorithm == Algorithm.hybrid
+        report(
+            "estimating_resources",
+            "Preparing equal-length sequence comparison"
+            if direct_hybrid
+            else "Generating bounded genomic windows",
+            40,
         )
-        report("estimating_resources", "Generating bounded genomic windows", 40)
-        generated = generate_windows(
-            records,
-            query_length=query.length,
-            stride=request.window_stride,
-            strand=request.strand,
-            max_windows=request.max_windows,
-            max_bases_per_record=request.max_bases_per_record,
-            max_total_bases=request.max_total_bases,
-        )
-        if not generated.windows:
+        if direct_hybrid:
+            record = records[0]
+            engine = self._engine(request.algorithm)
+            engine.validate_request(query.sequence, record.sequence)
+            windows = [
+                WindowRecord(
+                    accession=record.accession,
+                    recordTitle=record.title,
+                    organism=record.organism,
+                    taxId=record.tax_id,
+                    sourceDatabase=record.source_database,
+                    chromosome=record.chromosome,
+                    strand="forward",
+                    startZeroBased=0,
+                    endZeroBased=len(record.sequence),
+                    sequence=record.sequence,
+                )
+            ]
+            generated = None
+        else:
+            generated = generate_windows(
+                records,
+                query_length=query.length,
+                stride=request.window_stride,
+                strand=request.strand,
+                max_windows=request.max_windows,
+                max_bases_per_record=request.max_bases_per_record,
+                max_total_bases=request.max_total_bases,
+            )
+            windows = generated.windows
+        if not windows:
             raise NcbiValidationError("No ACGT-compatible genomic windows were available for quantum processing")
         engine = self._engine(request.algorithm)
         resource = (
@@ -245,12 +360,26 @@ class SearchOrchestrator:
             totalBases=sum(min(len(record.sequence), request.max_bases_per_record) for record in records),
         ).model_dump(by_alias=True)
         retrieval.update(retrieval_details)
-        warnings = [
-            *retrieval_warnings,
-            *generated.summary.warnings,
-            f"Ambiguous bases: {generated.summary.ambiguous_bases}; total windows: {generated.summary.total_windows}; "
-            f"accepted windows: {generated.summary.accepted_windows}; skipped windows: {generated.summary.skipped_windows}",
-        ]
+        warnings = [*retrieval_warnings]
+        if direct_hybrid:
+            warnings.append(
+                "Hybrid compared the pasted equal-length sequences directly; no sliding windows "
+                "or classically supplied mismatch positions were used."
+            )
+            truncated = False
+        else:
+            assert generated is not None
+            warnings.extend(
+                [
+                    *generated.summary.warnings,
+                    f"Ambiguous bases: {generated.summary.ambiguous_bases}; total windows: {generated.summary.total_windows}; "
+                    f"accepted windows: {generated.summary.accepted_windows}; skipped windows: {generated.summary.skipped_windows}",
+                ]
+            )
+            truncated = generated.summary.truncated
+        query_warning = self._bounded_query_warning(full_query.length, query.length)
+        if query_warning:
+            warnings.append(query_warning)
         if request.max_records > 10 or request.max_total_bases > 50000:
             warnings.append(LARGE_SCOPE_WARNING)
         shell = result_shell(
@@ -258,22 +387,31 @@ class SearchOrchestrator:
             query.sequence,
             retrieval,
             warnings,
-            {"occurred": generated.summary.truncated, "reason": "configured bounds" if generated.summary.truncated else None},
+            {"occurred": truncated, "reason": "configured bounds" if truncated else None},
         )
         shell["jobId"] = job_id
-        shell["windowSelection"] = {
-            "mode": "first_valid_sliding_windows",
-            "description": (
-                "Target sequences are normalized to ACGT-compatible genomic windows, scanned by coordinate order, "
-                "bounded by maxWindows, quantum-scored, then ranked by quantumScore."
-            ),
-            "requestedMaxWindows": request.max_windows,
-            "acceptedWindows": generated.summary.accepted_windows,
-            "processedWindows": generated.summary.accepted_windows,
-            "windowStride": request.window_stride,
-            "strand": request.strand,
-            "ranking": "quantumScore descending after bounded window processing",
-        }
+        shell["query"].update(
+            {
+                "inputLength": full_query.length,
+                "quantumWindowLength": query.length,
+                "inputTruncatedForQuantum": full_query.length > query.length,
+            }
+        )
+        if not direct_hybrid:
+            assert generated is not None
+            shell["windowSelection"] = {
+                "mode": "first_valid_sliding_windows",
+                "description": (
+                    "Target sequences are normalized to ACGT-compatible genomic windows, scanned by coordinate order, "
+                    "bounded by maxWindows, quantum-scored, then ranked by quantumScore."
+                ),
+                "requestedMaxWindows": request.max_windows,
+                "acceptedWindows": generated.summary.accepted_windows,
+                "processedWindows": generated.summary.accepted_windows,
+                "windowStride": request.window_stride,
+                "strand": request.strand,
+                "ranking": "quantumScore descending after bounded window processing",
+            }
         options = QuantumRunOptions(
             shots=request.shots,
             simulator=request.simulator,
@@ -284,7 +422,7 @@ class SearchOrchestrator:
         aggregate_counts: dict[str, int] = {}
         quantum_execution_seconds = 0.0
         report("simulating", "Running AerSimulator", 80)
-        for window in generated.windows:
+        for window in windows:
             started = time.perf_counter()
             quantum = engine.run(query.sequence, window.sequence, options)
             quantum_execution_seconds += time.perf_counter() - started
@@ -303,9 +441,14 @@ class SearchOrchestrator:
                 "sequencePreview": matched_window[:10],
                 "windowLength": len(matched_window),
                 "accession": top_hit.get("accession"),
-                "coordinates": f"{top_hit.get('start')}-{top_hit.get('end')}",
+                "coordinates": None
+                if direct_hybrid
+                else f"{top_hit.get('start')}-{top_hit.get('end')}",
                 "selectionMethod": (
-                    "The backend generated bounded A/C/G/T windows from the selected reference "
+                    "The backend compared the complete pasted reference directly with the "
+                    "equal-length pasted query in one Hybrid circuit."
+                    if direct_hybrid
+                    else "The backend generated bounded A/C/G/T windows from the selected reference "
                     "source, ran the chosen quantum circuit on accepted windows, and this is the "
                     "top-ranked processed window. It is not the complete genome sequence."
                 ),
@@ -313,8 +456,13 @@ class SearchOrchestrator:
         shell["quantumMetrics"] = {
             "algorithm": request.algorithm.value,
             "quantumAlphabet": "ACGT",
-            "windowsProcessed": len(hits),
-            "windowSelectionMode": "first_valid_sliding_windows_then_quantum_score_ranking",
+            "windowsProcessed": 0 if direct_hybrid else len(hits),
+            "sequenceComparisons": 1 if direct_hybrid else None,
+            "windowSelectionMode": (
+                "not_applicable_direct_equal_length_comparison"
+                if direct_hybrid
+                else "first_valid_sliding_windows_then_quantum_score_ranking"
+            ),
             "groverBoundaryMode": request.grover_boundary_mode,
             "quantumExecutionSeconds": quantum_execution_seconds,
             "shotsPerRun": request.shots,
@@ -421,11 +569,7 @@ class SearchOrchestrator:
         }
 
     def validate_result_candidates(self, request: SearchRequest, result: dict) -> dict:
-        query = normalize_query_input(
-            self._query_text(request),
-            is_fasta=request.query_source.value == "uploaded_fasta",
-            max_length=request.max_query_length,
-        )
+        query, _full_query = self._normalize_bounded_query(request)
         records = self._retrieve_records(request)
         hits = result.get("hits", [])
         for hit in hits:

@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as QuantumSearchResultsRouteImport } from './routes/quantum-search-results'
 import { Route as QuantumSearchRouteImport } from './routes/quantum-search'
+import { Route as QuantumHardwareResultsRouteImport } from './routes/quantum-hardware-results'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as NcbiSearchRouteImport } from './routes/ncbi.search'
@@ -25,6 +26,11 @@ const QuantumSearchResultsRoute = QuantumSearchResultsRouteImport.update({
 const QuantumSearchRoute = QuantumSearchRouteImport.update({
   id: '/quantum-search',
   path: '/quantum-search',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const QuantumHardwareResultsRoute = QuantumHardwareResultsRouteImport.update({
+  id: '/quantum-hardware-results',
+  path: '/quantum-hardware-results',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DashboardRoute = DashboardRouteImport.update({
@@ -56,6 +62,7 @@ const NcbiOrganismTaxIdRoute = NcbiOrganismTaxIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRoute
+  '/quantum-hardware-results': typeof QuantumHardwareResultsRoute
   '/quantum-search': typeof QuantumSearchRoute
   '/quantum-search-results': typeof QuantumSearchResultsRoute
   '/ncbi/search': typeof NcbiSearchRoute
@@ -65,6 +72,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRoute
+  '/quantum-hardware-results': typeof QuantumHardwareResultsRoute
   '/quantum-search': typeof QuantumSearchRoute
   '/quantum-search-results': typeof QuantumSearchResultsRoute
   '/ncbi/search': typeof NcbiSearchRoute
@@ -75,6 +83,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRoute
+  '/quantum-hardware-results': typeof QuantumHardwareResultsRoute
   '/quantum-search': typeof QuantumSearchRoute
   '/quantum-search-results': typeof QuantumSearchResultsRoute
   '/ncbi/search': typeof NcbiSearchRoute
@@ -86,6 +95,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/dashboard'
+    | '/quantum-hardware-results'
     | '/quantum-search'
     | '/quantum-search-results'
     | '/ncbi/search'
@@ -95,6 +105,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/dashboard'
+    | '/quantum-hardware-results'
     | '/quantum-search'
     | '/quantum-search-results'
     | '/ncbi/search'
@@ -104,6 +115,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/dashboard'
+    | '/quantum-hardware-results'
     | '/quantum-search'
     | '/quantum-search-results'
     | '/ncbi/search'
@@ -114,6 +126,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   DashboardRoute: typeof DashboardRoute
+  QuantumHardwareResultsRoute: typeof QuantumHardwareResultsRoute
   QuantumSearchRoute: typeof QuantumSearchRoute
   QuantumSearchResultsRoute: typeof QuantumSearchResultsRoute
   NcbiSearchRoute: typeof NcbiSearchRoute
@@ -135,6 +148,13 @@ declare module '@tanstack/react-router' {
       path: '/quantum-search'
       fullPath: '/quantum-search'
       preLoaderRoute: typeof QuantumSearchRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/quantum-hardware-results': {
+      id: '/quantum-hardware-results'
+      path: '/quantum-hardware-results'
+      fullPath: '/quantum-hardware-results'
+      preLoaderRoute: typeof QuantumHardwareResultsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/dashboard': {
@@ -178,6 +198,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   DashboardRoute: DashboardRoute,
+  QuantumHardwareResultsRoute: QuantumHardwareResultsRoute,
   QuantumSearchRoute: QuantumSearchRoute,
   QuantumSearchResultsRoute: QuantumSearchResultsRoute,
   NcbiSearchRoute: NcbiSearchRoute,

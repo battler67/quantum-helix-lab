@@ -33,6 +33,37 @@ def test_estimate_endpoint_with_local_fixture():
     assert body["estimatedEndToEndSecondsMax"] >= body["estimatedSimulationSecondsMax"]
 
 
+def test_estimate_endpoint_accepts_one_hundred_thousand_base_fasta_strings():
+    sequence = "ACGT" * 25_000
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/quantum-search/estimate",
+        json={
+            "querySource": "pasted",
+            "querySequence": f">query length=100000 seed=42\n{sequence}",
+            "referenceSequence": (
+                f">reference_sequence length=100000 seed=42\n{sequence}"
+            ),
+            "algorithm": "frqi",
+            "databaseScope": "pasted_sequence",
+            "maxQueryLength": 32,
+            "maxBasesPerRecord": 100_000,
+            "maxTotalBases": 100_000,
+            "maxWindows": 1,
+            "shots": 138,
+            "strand": "forward",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["inputQueryLength"] == 100_000
+    assert body["quantumWindowLength"] == 32
+    assert body["inputTruncatedForQuantum"] is True
+    assert body["hardwareEligible"] is True
+
+
 def test_candidate_validation_is_on_demand():
     client = TestClient(app)
     create_response = client.post(

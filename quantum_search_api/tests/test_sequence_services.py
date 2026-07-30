@@ -15,6 +15,18 @@ def test_fasta_parsing_and_query_normalization():
     assert normalized.sequence == "ACGT"
 
 
+def test_normalization_accepts_one_hundred_thousand_base_fasta_input():
+    sequence = "ACGT" * 25_000
+
+    normalized = normalize_query_input(
+        f">query length=100000 seed=42\n{sequence}\n",
+        is_fasta=True,
+    )
+
+    assert normalized.length == 100_000
+    assert normalized.sequence == sequence
+
+
 def test_invalid_query_symbol_reports_position():
     with pytest.raises(SequenceValidationError) as exc:
         validate_query_acgt("ACNT")

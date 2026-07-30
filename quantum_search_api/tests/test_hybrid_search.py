@@ -82,9 +82,9 @@ def test_hybrid_request_is_now_valid_and_engine_reports_unknown_m_metadata():
     request = SearchRequest(
         querySource="pasted",
         querySequence="AAAA",
+        referenceSequence="AAAT",
         algorithm="hybrid",
-        databaseScope="uploaded_fasta",
-        uploadedFasta=">demo\nAAAT\n",
+        databaseScope="pasted_sequence",
         maxWindows=1,
         shots=1024,
         strand="forward",

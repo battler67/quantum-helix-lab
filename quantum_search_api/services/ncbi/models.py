@@ -132,6 +132,20 @@ class SearchRequest(BaseModel):
             raise ValueError("uploadedFasta is required for the uploaded FASTA reference scope")
         if self.database_scope == DatabaseScope.pasted_sequence and not self.reference_sequence:
             raise ValueError("referenceSequence is required for the pasted genomic DNA scope")
+        if self.algorithm == Algorithm.hybrid:
+            if (
+                self.query_source != QuerySource.pasted
+                or self.database_scope != DatabaseScope.pasted_sequence
+            ):
+                raise ValueError(
+                    "Hybrid mode requires pasted query and reference sequences"
+                )
+            query = "".join((self.query_sequence or "").split()).upper()
+            reference = "".join((self.reference_sequence or "").split()).upper()
+            if len(query) != len(reference):
+                raise ValueError(
+                    "Hybrid mismatch comparison requires equal-length query and reference sequences"
+                )
         return self
 
 
@@ -168,6 +182,9 @@ class RetrievalSummary(BaseModel):
 
 
 class SearchEstimate(BaseModel):
+    input_query_length: int = Field(alias="inputQueryLength")
+    quantum_window_length: int = Field(alias="quantumWindowLength")
+    input_truncated_for_quantum: bool = Field(alias="inputTruncatedForQuantum")
     record_count: int = Field(alias="recordCount")
     total_bases: int = Field(alias="totalBases")
     total_windows: int = Field(alias="totalWindows")
@@ -179,6 +196,9 @@ class SearchEstimate(BaseModel):
     estimated_logical_qubits: int = Field(alias="estimatedLogicalQubits")
     estimated_grover_iterations: int = Field(alias="estimatedGroverIterations")
     exceeds_simulator_limits: bool = Field(alias="exceedsSimulatorLimits")
+    hardware_eligible: bool = Field(alias="hardwareEligible")
+    hardware_qubit_capacity: int = Field(alias="hardwareQubitCapacity")
+    hardware_eligibility_note: str = Field(alias="hardwareEligibilityNote")
     sampling_or_truncation: bool = Field(alias="samplingOrTruncation")
     warnings: list[str]
     estimate_mode: Literal["metadata_only"] = Field(
