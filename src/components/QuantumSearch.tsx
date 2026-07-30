@@ -16,6 +16,7 @@ import {
   Loader2,
   Play,
   Search,
+  Sparkles,
   Upload,
   XCircle,
 } from "lucide-react";
@@ -43,6 +44,14 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  AI_REPORT_SECTIONS,
+  reportFactRows,
+  type AiAnalysisReport,
+} from "@/lib/ai-report";
+import { downloadAiReportPdf } from "@/lib/ai-report-pdf";
+import { analyzeHybridMutations } from "@/lib/hybridMutationAnalysis";
+import frqiClaimedGraph from "../../cacheResults/Images/frqi_claimed.png";
 
 const fadeUp: Variants = {
   hidden: { opacity: 0, y: 16, filter: "blur(6px)" },
@@ -976,24 +985,6 @@ export function QuantumSearch() {
           </div>
         </motion.div>
 
-        {(largeScope || algorithm === "hybrid" || !algorithm) && (
-          <div className="glass rounded-2xl p-4 text-sm text-muted-foreground">
-            <div className="flex gap-3">
-              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-yellow-400" />
-              <span>
-                {!algorithm
-                  ? "Select FRQI, Grover, or Hybrid before estimating. Double-clicking a selected method clears it."
-                  : algorithm === "hybrid"
-                    ? !hybridLengthsMatch &&
-                      (sequencePreview.length > 0 || referencePreview.length > 0)
-                      ? `Hybrid requires equal lengths. Query: ${sequencePreview.length} bases; reference: ${referencePreview.length} bases. Estimate and Run Search stay disabled until they match.`
-                      : "Hybrid directly compares the pasted equal-length sequences with an in-circuit XOR mismatch predicate and an unknown-M fixed-point schedule. No sliding windows are generated."
-                    : "Large database searches use staged retrieval and bounded quantum processing. The entire GenBank database is not loaded into the quantum circuit."}
-              </span>
-            </div>
-          </div>
-        )}
-
         {(analysisLoading || analysisImport || analysisError) && (
           <Panel title="NCBI Sequence Analysis" eyebrow="Imported accession" icon={Dna}>
             {analysisLoading && (
@@ -1485,6 +1476,24 @@ export function QuantumSearch() {
           </Panel>
         </div>
 
+        {(largeScope || algorithm === "hybrid" || !algorithm) && (
+          <div className="glass rounded-2xl p-4 text-sm text-muted-foreground">
+            <div className="flex gap-3">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-yellow-400" />
+              <span>
+                {!algorithm
+                  ? "Select FRQI, Grover, or Hybrid before estimating. Double-clicking a selected method clears it."
+                  : algorithm === "hybrid"
+                    ? !hybridLengthsMatch &&
+                      (sequencePreview.length > 0 || referencePreview.length > 0)
+                      ? `Hybrid requires equal lengths. Query: ${sequencePreview.length} bases; reference: ${referencePreview.length} bases. Estimate and Run Search stay disabled until they match.`
+                      : "Hybrid directly compares the pasted equal-length sequences with an in-circuit XOR mismatch predicate and an unknown-M fixed-point schedule. No sliding windows are generated."
+                    : "Large database searches use staged retrieval and bounded quantum processing. The entire GenBank database is not loaded into the quantum circuit."}
+              </span>
+            </div>
+          </div>
+        )}
+
         <Dialog open={limitDialog !== null} onOpenChange={(open) => !open && setLimitDialog(null)}>
           <DialogContent className="border-yellow-400/20 bg-background">
             <DialogHeader>
@@ -1547,6 +1556,9 @@ export function QuantumSearchResultsPage({ jobId }: { jobId: string }) {
   const [blastMaxRecords, setBlastMaxRecords] = useState(25);
   const [noiseResult, setNoiseResult] = useState<NoiseComparison | null>(null);
   const [noiseLoading, setNoiseLoading] = useState(false);
+  const [aiReport, setAiReport] = useState<AiAnalysisReport | null>(null);
+  const [reportLoading, setReportLoading] = useState(false);
+  const [reportError, setReportError] = useState("");
   const [noiseSingleQubitError, setNoiseSingleQubitError] = useState(0.002);
   const [noiseTwoQubitError, setNoiseTwoQubitError] = useState(0.01);
   const [readoutZeroToOne, setReadoutZeroToOne] = useState(0.03);
@@ -1584,14 +1596,33 @@ export function QuantumSearchResultsPage({ jobId }: { jobId: string }) {
     };
   }, [result]);
 
+  const hybridMutationAnalysis = useMemo(() => {
+    if (result?.algorithm !== "hybrid") return null;
+    const querySequence =
+      result.query?.sequence ||
+      result.hits[0]?.querySequence ||
+      result.query?.sequencePreview ||
+      "";
+    const referenceSequence = result.hits[0]?.matchedWindow || "";
+    if (!querySequence || !referenceSequence || querySequence.length !== referenceSequence.length) {
+      return null;
+    }
+    try {
+      return analyzeHybridMutations(referenceSequence, querySequence);
+    } catch {
+      return null;
+    }
+  }, [result]);
+
   const hybridMutationRows = useMemo(() => {
-    if (result?.algorithm !== "hybrid") return [];
+    if (!hybridMutationAnalysis || result?.algorithm !== "hybrid") return [];
     const details = result.hits[0]?.quantumDetails;
     const candidates = Array.isArray(details?.measuredCandidateIndices)
       ? details.measuredCandidateIndices
           .map((value) => Number(value))
           .filter((value) => Number.isInteger(value) && value >= 0)
       : [];
+    const candidateSet = new Set(candidates);
     const probabilities = asRecord(details?.indexProbabilities);
     const counts = asRecord(details?.counts);
     const measuredStates = counts ? Object.keys(counts) : [];
@@ -1603,24 +1634,30 @@ export function QuantumSearchResultsPage({ jobId }: { jobId: string }) {
       ? Object.values(counts).reduce((total, value) => total + (numberMetric(value) ?? 0), 0)
       : 0;
 
-    return candidates
-      .map((position) => {
-        const measuredState = position.toString(2).padStart(stateWidth, "0");
-        const shotCount = numberMetric(counts?.[measuredState]) ?? 0;
-        const probability =
-          numberMetric(probabilities?.[String(position)]) ??
-          (totalShots > 0 ? shotCount / totalShots : 0);
-        return { position, measuredState, probability, shotCount };
-      })
-      .sort((left, right) => right.probability - left.probability || left.position - right.position)
-      .map((row, index) => ({ ...row, rank: index + 1 }));
-  }, [result]);
+    return hybridMutationAnalysis.mutations.map((mutation, index) => {
+      const measuredState = mutation.positionZeroBased.toString(2).padStart(stateWidth, "0");
+      const shotCount = numberMetric(counts?.[measuredState]) ?? 0;
+      const probability =
+        numberMetric(probabilities?.[String(mutation.positionZeroBased)]) ??
+        (totalShots > 0 ? shotCount / totalShots : 0);
+      return {
+        ...mutation,
+        rank: index + 1,
+        measuredState,
+        probability,
+        shotCount,
+        amplified: candidateSet.has(mutation.positionZeroBased),
+      };
+    });
+  }, [hybridMutationAnalysis, result]);
+
+  const hybridSpectrumData = hybridMutationAnalysis?.spectrum ?? [];
 
   const scoreChartData = useMemo(
     () =>
       result?.algorithm === "hybrid"
         ? hybridMutationRows.map((row) => ({
-            label: `${row.position}`,
+            label: `${row.positionZeroBased}`,
             score: row.probability,
           }))
         : (result?.hits ?? []).map((hit) => ({
@@ -1748,6 +1785,11 @@ export function QuantumSearchResultsPage({ jobId }: { jobId: string }) {
   }, [result]);
 
   useEffect(() => {
+    setAiReport(null);
+    setReportError("");
+  }, [noiseResult, result]);
+
+  useEffect(() => {
     setNoiseResult(null);
     setNoiseLoading(false);
     if (!jobId) return;
@@ -1845,6 +1887,25 @@ export function QuantumSearchResultsPage({ jobId }: { jobId: string }) {
       setError(err instanceof Error ? err.message : "Noisy simulation failed");
     } finally {
       setNoiseLoading(false);
+    }
+  }
+
+  async function handleGenerateReport() {
+    if (!result?.jobId) return;
+    setReportLoading(true);
+    setReportError("");
+    try {
+      const response = await fetch(
+        `${API_BASE}/api/quantum-search/jobs/${result.jobId}/report`,
+        { method: "POST" },
+      );
+      const body = await response.json().catch(() => ({ detail: response.statusText }));
+      if (!response.ok) throw new Error(formatApiError(body, "AI report generation failed"));
+      setAiReport(body as AiAnalysisReport);
+    } catch (err) {
+      setReportError(err instanceof Error ? err.message : "AI report generation failed");
+    } finally {
+      setReportLoading(false);
     }
   }
 
@@ -2053,6 +2114,27 @@ export function QuantumSearchResultsPage({ jobId }: { jobId: string }) {
                     )}
                     {noiseLoading ? "Running noisy simulation..." : "Add Noise"}
                   </Button>
+                  <Button
+                    onClick={handleGenerateReport}
+                    disabled={reportLoading}
+                    variant="outline"
+                    className="rounded-full border-emerald/30 bg-emerald/10 text-emerald hover:bg-emerald/20"
+                  >
+                    {reportLoading ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Sparkles className="h-4 w-4" />
+                    )}
+                    {reportLoading ? "Generating Report..." : "Generate Report"}
+                  </Button>
+                  <Button
+                    onClick={() => aiReport && downloadAiReportPdf(aiReport)}
+                    disabled={!aiReport || reportLoading}
+                    variant="outline"
+                    className="rounded-full border-white/10 bg-white/5"
+                  >
+                    <Download className="h-4 w-4" /> Download PDF
+                  </Button>
                   <label className="flex items-center gap-2 text-xs text-muted-foreground">
                     BLAST records
                     <Input
@@ -2201,24 +2283,76 @@ export function QuantumSearchResultsPage({ jobId }: { jobId: string }) {
                   </p>
                 </div>
               )}
+              {result.algorithm === "hybrid" && hybridMutationAnalysis && (
+                <div className="rounded-xl border border-cyan-glow/20 bg-cyan-glow/5 p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <div className="text-xs uppercase tracking-widest text-cyan-glow">
+                        Classical sequence analysis
+                      </div>
+                      <h2 className="mt-1 font-display text-lg font-semibold">
+                        Substitutions derived from the pasted sequence pair
+                      </h2>
+                      <p className="mt-1 max-w-4xl text-xs text-muted-foreground">
+                        Reference-to-query changes are calculated directly from the two equal-length
+                        A/C/G/T strings. These values describe substitutions only; pasted sequences
+                        do not provide the genome assembly or annotation needed for genomic, gene,
+                        codon, or clinical interpretation.
+                      </p>
+                    </div>
+                    <span className="rounded-full border border-cyan-glow/30 bg-black/20 px-3 py-1 text-xs text-cyan-glow">
+                      Classical comparison
+                    </span>
+                  </div>
+                  <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+                    <Metric label="Sequence length" value={hybridMutationAnalysis.sequenceLength} />
+                    <Metric label="Substitutions" value={hybridMutationAnalysis.mutationCount} />
+                    <Metric
+                      label="Mutation rate"
+                      value={formatProbability(hybridMutationAnalysis.mutationRate)}
+                    />
+                    <Metric label="Transitions" value={hybridMutationAnalysis.transitionCount} />
+                    <Metric
+                      label="Transversions"
+                      value={hybridMutationAnalysis.transversionCount}
+                    />
+                    <Metric
+                      label="Ts/Tv ratio"
+                      value={formatTransitionTransversionRatio(hybridMutationAnalysis)}
+                    />
+                  </div>
+                </div>
+              )}
               <div className="overflow-x-auto rounded-xl border border-white/10">
                 {result.algorithm === "hybrid" ? (
-                  <table className="w-full min-w-[620px] text-left text-sm">
+                  <table className="w-full min-w-[1280px] text-left text-sm">
                     <thead className="bg-white/5 text-xs uppercase tracking-wider text-muted-foreground">
                       <tr>
-                        <th className="px-3 py-3">Rank</th>
-                        <th className="px-3 py-3">Mutation coordinate (zero-based)</th>
+                        <th className="px-3 py-3">Position (one-based)</th>
+                        <th className="px-3 py-3">Circuit coordinate (zero-based)</th>
+                        <th className="px-3 py-3">Variant</th>
+                        <th className="px-3 py-3">Class</th>
+                        <th className="px-3 py-3">Reference context (±2)</th>
+                        <th className="px-3 py-3">Query context (±2)</th>
                         <th className="px-3 py-3">Measured state</th>
-                        <th className="px-3 py-3">Measured probability</th>
+                        <th className="px-3 py-3">Quantum probability</th>
                         <th className="px-3 py-3">Shot count</th>
                       </tr>
                     </thead>
                     <tbody>
                       {hybridMutationRows.length > 0 ? (
                         hybridMutationRows.map((row) => (
-                          <tr key={row.position} className="border-t border-white/5">
-                            <td className="px-3 py-3 font-mono text-emerald">{row.rank}</td>
-                            <td className="px-3 py-3 font-mono text-emerald">{row.position}</td>
+                          <tr key={row.positionZeroBased} className="border-t border-white/5">
+                            <td className="px-3 py-3 font-mono text-emerald">
+                              {row.positionOneBased}
+                            </td>
+                            <td className="px-3 py-3 font-mono">{row.positionZeroBased}</td>
+                            <td className="px-3 py-3 font-mono font-semibold text-cyan-glow">
+                              {row.referenceBase}→{row.alternateBase}
+                            </td>
+                            <td className="px-3 py-3 capitalize">{row.mutationClass}</td>
+                            <td className="px-3 py-3 font-mono text-xs">{row.referenceContext}</td>
+                            <td className="px-3 py-3 font-mono text-xs">{row.queryContext}</td>
                             <td className="px-3 py-3 font-mono">{row.measuredState}</td>
                             <td className="px-3 py-3 font-mono">
                               {formatProbability(row.probability)}
@@ -2229,10 +2363,10 @@ export function QuantumSearchResultsPage({ jobId }: { jobId: string }) {
                       ) : (
                         <tr className="border-t border-white/5">
                           <td
-                            colSpan={5}
+                            colSpan={9}
                             className="px-3 py-6 text-center text-sm text-muted-foreground"
                           >
-                            No mutation positions were amplified above the measurement threshold.
+                            The pasted sequences are identical; no substitutions were found.
                           </td>
                         </tr>
                       )}
@@ -2397,6 +2531,67 @@ export function QuantumSearchResultsPage({ jobId }: { jobId: string }) {
                     </BarChart>
                   </ResponsiveContainer>
                 </VisualizationCard>
+                {result.algorithm === "frqi" && (
+                  <VisualizationCard
+                    title="FRQI representation scaling"
+                    description="Conceptual classical-versus-quantum scaling graph supplied for the FRQI demonstration; it is not measured from this search run."
+                  >
+                    <div className="flex h-full items-center justify-center overflow-hidden rounded-lg bg-white p-2">
+                      <img
+                        src={frqiClaimedGraph}
+                        alt="Log-scale graph with Number of pixels N on the x-axis and Number of bits and qubits on the y-axis, comparing classical and quantum representation scaling"
+                        className="h-full w-full object-contain"
+                      />
+                    </div>
+                  </VisualizationCard>
+                )}
+                {result.algorithm === "hybrid" && (
+                  <VisualizationCard
+                    title="Substitution spectrum"
+                    description="Classical counts for all 12 directed reference-to-query substitutions; zero-count classes remain visible."
+                  >
+                    <ResponsiveContainer>
+                      <BarChart
+                        data={hybridSpectrumData}
+                        margin={{ top: 8, right: 12, bottom: 28, left: 0 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+                        <XAxis
+                          dataKey="substitution"
+                          interval={0}
+                          tick={{ fill: "#94a3b8", fontSize: 9 }}
+                          label={{
+                            value: "Reference > query",
+                            position: "insideBottom",
+                            offset: -18,
+                            fill: "#94a3b8",
+                            fontSize: 10,
+                          }}
+                        />
+                        <YAxis
+                          allowDecimals={false}
+                          tick={{ fill: "#94a3b8", fontSize: 10 }}
+                          label={{
+                            value: "Substitution count",
+                            angle: -90,
+                            position: "insideLeft",
+                            fill: "#94a3b8",
+                            fontSize: 10,
+                          }}
+                        />
+                        <Tooltip
+                          contentStyle={{
+                            background: "#0b1a15",
+                            border: "1px solid rgba(16,185,129,0.3)",
+                            borderRadius: 12,
+                            fontSize: 12,
+                          }}
+                        />
+                        <Bar dataKey="count" fill="#10B981" radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </VisualizationCard>
+                )}
                 {result.algorithm !== "hybrid" && (
                   <>
                     <VisualizationCard
@@ -2726,6 +2921,77 @@ export function QuantumSearchResultsPage({ jobId }: { jobId: string }) {
             </div>
           </Panel>
         )}
+        {(aiReport || reportError) && (
+          <Panel
+            title="AI Quantum DNA Analysis Report"
+            eyebrow="Measured facts and bounded AI interpretation"
+            icon={Sparkles}
+          >
+            {reportError && (
+              <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-300">
+                {reportError}
+              </div>
+            )}
+            {aiReport && (
+              <div className="space-y-5">
+                <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground">
+                  <span>
+                    Report {aiReport.reportId} · {aiReport.algorithm} · {aiReport.model}
+                  </span>
+                  <span>{new Date(aiReport.generatedAt).toLocaleString()}</span>
+                </div>
+
+                <section className="rounded-xl border border-cyan-glow/20 bg-cyan-glow/5 p-4">
+                  <div className="text-xs uppercase tracking-widest text-cyan-glow">
+                    Measured facts — application computed
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    These values come from the completed job and optional noise simulation. They
+                    were not authored by the AI.
+                  </p>
+                  <div className="mt-4 grid gap-2 md:grid-cols-2">
+                    {reportFactRows(aiReport.measuredFacts).map((fact, index) => (
+                      <div
+                        key={`${fact.category}-${fact.label}-${index}`}
+                        className="rounded-lg border border-white/10 bg-black/20 p-3"
+                      >
+                        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                          {fact.category} · {fact.label}
+                        </div>
+                        <div className="mt-1 break-words font-mono text-xs text-foreground">
+                          {fact.value}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+
+                <section>
+                  <div className="text-xs uppercase tracking-widest text-emerald">
+                    AI interpretations — constrained to measured facts
+                  </div>
+                  <div className="mt-3 grid gap-3">
+                    {AI_REPORT_SECTIONS.map((section) => (
+                      <article
+                        key={section.key}
+                        className="rounded-xl border border-white/10 bg-white/5 p-4"
+                      >
+                        <h3 className="font-display text-base font-semibold">{section.title}</h3>
+                        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+                          {aiReport.aiInterpretations[section.key]}
+                        </p>
+                      </article>
+                    ))}
+                  </div>
+                </section>
+
+                <div className="rounded-lg border border-amber-400/30 bg-amber-400/10 p-3 text-xs text-amber-100">
+                  {aiReport.disclaimer}
+                </div>
+              </div>
+            )}
+          </Panel>
+        )}
         {result && result.warnings.length > 0 && (
           <div className="rounded-xl border border-yellow-400/20 bg-yellow-400/10 p-4">
             <div className="flex items-center gap-2 text-sm font-semibold text-yellow-100">
@@ -2914,6 +3180,17 @@ function formatProbability(value: number) {
   return `${(Math.min(1, Math.max(0, value)) * 100).toFixed(2)}%`;
 }
 
+function formatTransitionTransversionRatio(analysis: {
+  transitionCount: number;
+  transversionCount: number;
+  transitionTransversionRatio: number | null;
+}) {
+  if (analysis.transitionTransversionRatio != null) {
+    return analysis.transitionTransversionRatio.toFixed(2);
+  }
+  return analysis.transitionCount > 0 && analysis.transversionCount === 0 ? "∞" : "n/a";
+}
+
 function numberMetric(value: unknown): number | null {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
@@ -2986,31 +3263,56 @@ function splitList(value: string) {
 
 function toCsv(result: SearchResult) {
   if (result.algorithm === "hybrid") {
+    const querySequence =
+      result.query?.sequence ||
+      result.hits[0]?.querySequence ||
+      result.query?.sequencePreview ||
+      "";
+    const referenceSequence = result.hits[0]?.matchedWindow || "";
+    if (!querySequence || !referenceSequence || querySequence.length !== referenceSequence.length) {
+      return "positionOneBased,coordinateZeroBased,referenceBase,alternateBase,substitution,mutationClass,referenceContext,queryContext,measuredState,quantumProbability,shotCount,amplified";
+    }
+    const analysis = analyzeHybridMutations(referenceSequence, querySequence);
     const details = result.hits[0]?.quantumDetails;
-    const candidates = Array.isArray(details?.measuredCandidateIndices)
-      ? details.measuredCandidateIndices.map((value) => Number(value))
-      : [];
+    const candidates = new Set(
+      Array.isArray(details?.measuredCandidateIndices)
+        ? details.measuredCandidateIndices.map((value) => Number(value))
+        : [],
+    );
     const probabilities = asRecord(details?.indexProbabilities);
     const counts = asRecord(details?.counts);
     const stateWidth = counts
       ? Math.max(1, ...Object.keys(counts).map((state) => state.replace(/\s/g, "").length))
       : Math.max(1, Math.ceil(Math.log2(Math.max(2, result.query?.length ?? 2))));
-    const rows = ["rank,mutationCoordinateZeroBased,measuredState,measuredProbability,shotCount"];
-    candidates
-      .filter((position) => Number.isInteger(position) && position >= 0)
-      .sort((left, right) => left - right)
-      .forEach((position, index) => {
-        const measuredState = position.toString(2).padStart(stateWidth, "0");
-        rows.push(
-          [
-            index + 1,
-            position,
-            measuredState,
-            numberMetric(probabilities?.[String(position)]) ?? 0,
-            numberMetric(counts?.[measuredState]) ?? 0,
-          ].join(","),
-        );
-      });
+    const totalShots = counts
+      ? Object.values(counts).reduce((total, value) => total + (numberMetric(value) ?? 0), 0)
+      : 0;
+    const rows = [
+      "positionOneBased,coordinateZeroBased,referenceBase,alternateBase,substitution,mutationClass,referenceContext,queryContext,measuredState,quantumProbability,shotCount,amplified",
+    ];
+    analysis.mutations.forEach((mutation) => {
+      const measuredState = mutation.positionZeroBased.toString(2).padStart(stateWidth, "0");
+      const shotCount = numberMetric(counts?.[measuredState]) ?? 0;
+      const probability =
+        numberMetric(probabilities?.[String(mutation.positionZeroBased)]) ??
+        (totalShots > 0 ? shotCount / totalShots : 0);
+      rows.push(
+        [
+          mutation.positionOneBased,
+          mutation.positionZeroBased,
+          mutation.referenceBase,
+          mutation.alternateBase,
+          mutation.substitution,
+          mutation.mutationClass,
+          mutation.referenceContext,
+          mutation.queryContext,
+          measuredState,
+          probability,
+          shotCount,
+          candidates.has(mutation.positionZeroBased),
+        ].join(","),
+      );
+    });
     return rows.join("\n");
   }
   const rows = ["rank,accession,strand,start,end,algorithm,quantumScore,matchedWindow"];

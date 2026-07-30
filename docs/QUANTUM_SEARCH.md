@@ -1,5 +1,8 @@
 # Genomic Quantum Search
 
+AI-generated, mode-aware result reports are documented in
+[AI_REPORT_GENERATOR.md](AI_REPORT_GENERATOR.md).
+
 ## Overview
 
 The new genomic quantum search workflow is a BLAST-like nucleotide search experience, not an implementation of the BLAST algorithm. NCBI performs genomic sequence discovery and retrieval. The project then normalizes and windows retrieved genomic DNA before calling the existing FRQI or Grover/QGSA quantum simulator code.

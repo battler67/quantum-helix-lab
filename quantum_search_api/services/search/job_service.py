@@ -29,6 +29,8 @@ class SearchJob:
     progress_percent: int = 0
     result: dict[str, Any] | None = None
     noise_results: dict[str, dict[str, Any]] = field(default_factory=dict)
+    latest_noise_key: str | None = None
+    ai_reports: dict[str, dict[str, Any]] = field(default_factory=dict)
     error: str | None = None
     cancelled: bool = False
 
@@ -115,6 +117,8 @@ class InMemoryJobService:
         resolved = (settings or NoiseSettings()).resolved(job.request.algorithm.value)
         cache_key = json.dumps(resolved, sort_keys=True, separators=(",", ":"))
         if cache_key in job.noise_results:
+            job.latest_noise_key = cache_key
+            self._touch(job)
             return job.noise_results[cache_key]
         hits = job.result.get("hits") or []
         if not hits:
@@ -162,6 +166,7 @@ class InMemoryJobService:
             "querySequence": query_sequence,
         }
         job.noise_results[cache_key] = noise_result
+        job.latest_noise_key = cache_key
         self._touch(job)
         return noise_result
 

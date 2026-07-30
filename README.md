@@ -7,6 +7,9 @@ of FRQI similarity, QGSA/Grover exact-pattern search, and hybrid fixed-point sea
 The repository intentionally contains source code and tests, not local environments,
 downloaded dependencies, credentials, build folders, or generated experiment outputs.
 
+See [docs/AI_REPORT_GENERATOR.md](docs/AI_REPORT_GENERATOR.md) for the optional,
+backend-only OpenAI report generator and PDF download workflow.
+
 ## Repository layout
 
 ```text

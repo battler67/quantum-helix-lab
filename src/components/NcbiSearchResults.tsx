@@ -19,6 +19,7 @@ import type { LucideIcon } from "lucide-react";
 import { BackgroundFX } from "@/components/BackgroundFX";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { findDemoGenomeImage } from "@/lib/demo-genome-images";
 import { fetchGenomeViewerContext, type GenomeViewerContext } from "@/lib/genome-viewer";
 
 const API_BASE = import.meta.env.VITE_QUANTUM_API_BASE_URL || "http://127.0.0.1:8000";
@@ -71,11 +72,30 @@ export function NcbiSearchResults() {
   const [genomeViewer, setGenomeViewer] = useState<GenomeViewerContext | null>(null);
   const [genomeViewerLoading, setGenomeViewerLoading] = useState(false);
   const [genomeViewerError, setGenomeViewerError] = useState("");
+  const [executedGene, setExecutedGene] = useState("");
+  const [executedOrganism, setExecutedOrganism] = useState("");
 
   const totalPages = useMemo(() => {
     if (!data) return 1;
     return Math.max(1, Math.ceil(data.count / data.pageSize));
   }, [data]);
+
+  const selectedRecord = useMemo(
+    () => data?.records.find((record) => record.accession === selectedTreeAccession),
+    [data, selectedTreeAccession],
+  );
+
+  const displayedGenomeViewer = useMemo(() => {
+    if (!genomeViewer) return null;
+    const demoImage = findDemoGenomeImage({
+      gene: selectedRecord?.geneName || executedGene,
+      organism: executedOrganism,
+      scientificName: selectedRecord?.scientificName || genomeViewer.scientificName,
+      taxId: selectedRecord?.taxId || genomeViewer.taxId,
+      accession: selectedRecord?.accession,
+    });
+    return demoImage ? { ...genomeViewer, image: demoImage } : genomeViewer;
+  }, [executedGene, executedOrganism, genomeViewer, selectedRecord]);
 
   async function runSearch(nextPage = 1) {
     if (!gene.trim()) {
@@ -100,6 +120,8 @@ export function NcbiSearchResults() {
       if (!response.ok) throw new Error(String(body.detail || response.statusText));
       const nextData = body as NcbiSearchResponse;
       setData(nextData);
+      setExecutedGene(gene.trim());
+      setExecutedOrganism(organism.trim());
       const firstTreeRecord = nextData.records.find((record) => record.taxId);
       setSelectedTaxId(firstTreeRecord?.taxId || "");
       setSelectedTreeAccession(firstTreeRecord?.accession || "");
@@ -236,7 +258,7 @@ export function NcbiSearchResults() {
           </Panel>
 
           <Panel title="Genome Data Viewer" eyebrow="Taxonomy tree" icon={Network}>
-            <GenomeViewerPanel context={genomeViewer} loading={genomeViewerLoading} error={genomeViewerError} />
+            <GenomeViewerPanel context={displayedGenomeViewer} loading={genomeViewerLoading} error={genomeViewerError} />
           </Panel>
         </div>
 
@@ -346,7 +368,12 @@ function GenomeViewerPanel({
       <div className="overflow-hidden rounded-xl border border-white/10 bg-black/20">
         {context.image ? (
           <>
-            <img src={context.image.url} alt={context.scientificName} className="h-44 w-full object-cover" referrerPolicy="no-referrer" />
+            <img
+              src={context.image.url}
+              alt={context.image.title || context.scientificName}
+              className={`h-44 w-full ${context.image.source === "Local demo image" ? "bg-white object-contain" : "object-cover"}`}
+              referrerPolicy="no-referrer"
+            />
             <div className="border-t border-white/10 p-3">
               <div className="text-sm font-semibold">{context.image.title || context.scientificName}</div>
               <div className="mt-1 text-xs text-muted-foreground">{context.image.description || context.image.source}</div>

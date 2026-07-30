@@ -1,8 +1,11 @@
 import time
+import importlib
 
 from fastapi.testclient import TestClient
 
 from quantum_search_api.app import app, jobs
+from quantum_search_api.services.ncbi.models import SearchRequest
+from quantum_search_api.services.search.job_service import SearchJob
 
 
 def test_health_endpoint():
@@ -10,6 +13,83 @@ def test_health_endpoint():
     response = client.get("/api/health")
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
+
+
+def test_report_endpoint_returns_and_caches_separated_facts_and_interpretations(
+    monkeypatch,
+):
+    app_module = importlib.import_module("quantum_search_api.app")
+    request = SearchRequest(
+        querySource="pasted",
+        querySequence="A",
+        referenceSequence="T",
+        algorithm="hybrid",
+        databaseScope="pasted_sequence",
+        shots=16,
+    )
+    job = SearchJob(job_id="report-test", status="completed", request=request)
+    job.result = {
+        "jobId": job.job_id,
+        "algorithm": "hybrid",
+        "executionType": "quantum_simulator",
+        "hits": [
+            {
+                "quantumDetails": {
+                    "indexProbabilities": {"0": 0.1, "1": 0.9},
+                    "measuredCandidateIndices": [0],
+                    "iterationsExecuted": 1,
+                    "circuitMetrics": {"logical_qubits": 4, "depth": 8, "size": 12},
+                }
+            }
+        ],
+        "quantumMetrics": {"quantumExecutionSeconds": 0.1},
+    }
+    job.noise_results = {
+        "old": {
+            "ideal": {"successProbability": 0.9},
+            "noisy": {"successProbability": 0.2},
+            "mitigated": {"successProbability": 0.3},
+        },
+        "selected": {
+            "ideal": {"successProbability": 0.9},
+            "noisy": {"successProbability": 0.4},
+            "mitigated": {"successProbability": 0.7},
+        },
+    }
+    job.latest_noise_key = "selected"
+
+    class FakeGenerator:
+        model = "gpt-test"
+        calls = 0
+
+        def generate(self, facts):
+            self.calls += 1
+            return {
+                "executive_summary": "Summary.",
+                "dna_interpretation": "Mutation interpretation.",
+                "circuit_resource_analysis": "Circuit interpretation.",
+                "noise_mitigation_comparison": "No noise comparison was available.",
+                "reliability_limitations_conclusion": "Simulator-only conclusion.",
+            }
+
+    fake = FakeGenerator()
+    monkeypatch.setattr(app_module, "report_generator", fake)
+    jobs.jobs[job.job_id] = job
+    try:
+        client = TestClient(app)
+        first = client.post(f"/api/quantum-search/jobs/{job.job_id}/report")
+        second = client.post(f"/api/quantum-search/jobs/{job.job_id}/report")
+    finally:
+        jobs.jobs.pop(job.job_id, None)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert fake.calls == 1
+    body = first.json()
+    assert body["measuredFacts"]["measuredMismatchCandidatePositionsZeroBased"] == [0]
+    assert body["measuredFacts"]["noiseComparison"]["mitigated"]["successProbability"] == 0.7
+    assert body["aiInterpretations"]["executive_summary"] == "Summary."
+    assert "medical advice" in body["disclaimer"]
 
 
 def test_estimate_endpoint_with_local_fixture():
@@ -84,7 +164,8 @@ def test_candidate_validation_is_on_demand():
     job_id = create_response.json()["jobId"]
 
     result_response = None
-    for _ in range(50):
+    # The first Qiskit/Aer initialization on Windows can exceed 2.5 seconds.
+    for _ in range(300):
         result_response = client.get(f"/api/quantum-search/jobs/{job_id}/results")
         if result_response.status_code == 200:
             break

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -14,6 +15,12 @@ from quantum_search_api.services.ncbi.models import SearchRequest
 from quantum_search_api.services.hardware import HardwareJobService, HardwareSubmissionRequest
 from quantum_search_api.services.hardware.providers import HardwareProviderError
 from quantum_search_api.services.noise.config import NoiseSettings
+from quantum_search_api.services.reports import (
+    OpenAIReportGenerator,
+    ReportGenerationError,
+    build_measured_facts,
+    report_fingerprint,
+)
 from quantum_search_api.services.search.job_service import InMemoryJobService
 from quantum_search_api.services.search.search_orchestrator import SearchOrchestrator
 
@@ -38,6 +45,7 @@ orchestrator = SearchOrchestrator()
 jobs = InMemoryJobService(orchestrator)
 hardware_jobs = HardwareJobService()
 entrez_workflow = NcbiEntrezWorkflow()
+report_generator = OpenAIReportGenerator()
 
 
 def ncbi_http_error(exc: NcbiError) -> HTTPException:
@@ -97,6 +105,52 @@ def add_noise_to_job(job_id: str, settings: NoiseSettings | None = None) -> dict
     if result is None:
         raise HTTPException(status_code=404, detail="Completed job results were not found")
     return result
+
+
+@app.post("/api/quantum-search/jobs/{job_id}/report")
+def generate_job_report(job_id: str) -> dict:
+    job = jobs.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.status != "completed" or job.result is None:
+        raise HTTPException(status_code=409, detail=f"Job is {job.status}")
+
+    latest_noise = (
+        job.noise_results.get(job.latest_noise_key)
+        if job.latest_noise_key
+        else next(reversed(job.noise_results.values()), None)
+    )
+    try:
+        facts = build_measured_facts(job.result, latest_noise)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    fingerprint = report_fingerprint(facts)
+    cached = job.ai_reports.get(fingerprint)
+    if cached:
+        return cached
+
+    try:
+        interpretations = report_generator.generate(facts)
+    except ReportGenerationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    report = {
+        "reportId": fingerprint[:16],
+        "jobId": job_id,
+        "algorithm": facts["algorithm"],
+        "model": report_generator.model,
+        "generatedAt": datetime.now(timezone.utc).isoformat(),
+        "measuredFacts": facts,
+        "aiInterpretations": interpretations,
+        "disclaimer": (
+            "Research-use interpretation of simulator results only. This report is not "
+            "medical advice, a clinical diagnosis, evidence of pathogenicity, or proof "
+            "of quantum advantage or fault-tolerant hardware performance."
+        ),
+    }
+    job.ai_reports[fingerprint] = report
+    return report
 
 
 @app.post("/api/quantum-search/jobs/{job_id}/validate")

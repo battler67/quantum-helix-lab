@@ -21,6 +21,7 @@ import { LoadingInsight } from "@/components/LoadingInsight";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { findDemoGenomeImage } from "@/lib/demo-genome-images";
 import { fetchGenomeViewerContext, type GenomeViewerContext } from "@/lib/genome-viewer";
 
 const API_BASE = import.meta.env.VITE_QUANTUM_API_BASE_URL || "http://127.0.0.1:8000";
@@ -169,6 +170,17 @@ export function NcbiRecordDetails({ accession }: { accession: string }) {
   const filename = record ? buildFilename(record, format) : `NCBI_${accession}.${format}`;
   const downloadData = record ? buildDownloadData(record, selectedData, format) : "";
   const canAnalyze = record ? isDnaRecord(record.overview.moleculeType) : false;
+  const displayedGenomeViewer = useMemo(() => {
+    if (!record || !genomeViewer) return genomeViewer;
+    const demoImage = findDemoGenomeImage({
+      gene: record.overview.geneName,
+      organism: record.organism.organismName,
+      scientificName: record.organism.scientificName,
+      taxId: record.organism.taxId,
+      accession: record.overview.accession,
+    });
+    return demoImage ? { ...genomeViewer, image: demoImage } : genomeViewer;
+  }, [genomeViewer, record]);
 
   return (
     <div className="relative min-h-screen overflow-x-hidden">
@@ -363,7 +375,7 @@ export function NcbiRecordDetails({ accession }: { accession: string }) {
                 <Panel title="Genome Data Viewer" eyebrow="Taxonomy context" icon={Network}>
                   <GenomeViewerPanel
                     record={record}
-                    context={genomeViewer}
+                    context={displayedGenomeViewer}
                     loading={genomeViewerLoading}
                     error={genomeViewerError}
                   />
@@ -460,8 +472,12 @@ function GenomeViewerPanel({
           <>
             <img
               src={context.image.url}
-              alt={context.scientificName}
-              className="h-48 w-full object-cover"
+              alt={context.image.title || context.scientificName}
+              className={`h-48 w-full ${
+                context.image.source === "Local demo image"
+                  ? "bg-white object-contain"
+                  : "object-cover"
+              }`}
               referrerPolicy="no-referrer"
             />
             <div className="border-t border-white/10 p-3">
