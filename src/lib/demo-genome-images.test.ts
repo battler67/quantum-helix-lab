@@ -51,6 +51,8 @@ describe("demo genome image lookup", () => {
     });
 
     expect(image?.url).toBe("/demo/genome-viewer/nbr1-homo-sapiens.png");
+    expect(image?.title).toBe("");
+    expect(image?.description).toBe("");
   });
 
   test("matches taxonomy images without a supported gene", () => {

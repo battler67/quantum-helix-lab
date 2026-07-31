@@ -480,14 +480,16 @@ function GenomeViewerPanel({
               }`}
               referrerPolicy="no-referrer"
             />
-            <div className="border-t border-white/10 p-3">
-              <div className="text-sm font-semibold">
-                {context.image.title || context.scientificName}
+            {(context.image.title || context.image.description) && (
+              <div className="border-t border-white/10 p-3">
+                <div className="text-sm font-semibold">
+                  {context.image.title || context.scientificName}
+                </div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  {context.image.description || context.image.source}
+                </div>
               </div>
-              <div className="mt-1 text-xs text-muted-foreground">
-                {context.image.description || context.image.source}
-              </div>
-            </div>
+            )}
           </>
         ) : (
           <div className="flex h-48 flex-col items-center justify-center gap-2 p-4 text-center text-sm text-muted-foreground">

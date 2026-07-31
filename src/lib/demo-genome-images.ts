@@ -64,8 +64,8 @@ const DEMO_IMAGES: DemoGenomeImage[] = [
   {
     url: "/demo/genome-viewer/nbr1-homo-sapiens.png",
     source: "Local demo image",
-    title: "NBR1 — Homo sapiens",
-    description: "Reference image supplied for the local NBR1 genome-viewer demo.",
+    title: "",
+    description: "",
     pageUrl: "",
     genes: ["NBR1"],
     organisms: ["Homo sapiens", "human"],
