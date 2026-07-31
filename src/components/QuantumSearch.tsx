@@ -2262,15 +2262,6 @@ export function QuantumSearchResultsPage({ jobId }: { jobId: string }) {
                       <h2 className="mt-1 font-display text-lg font-semibold">
                         GenBank genomic BLAST comparison
                       </h2>
-                      <p className="mt-2 text-sm text-muted-foreground">
-                        {result.blastCheck.records.length} BLAST records across{" "}
-                        {result.blastCheck.organisms.length} organisms.
-                        {result.blastCheck.matchingQuantumAccessions.length} quantum accessions also
-                        appeared in BLAST results.
-                      </p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        Entrez filter: {result.blastCheck.entrezQuery}
-                      </p>
                     </div>
                     <span className="rounded-full border border-emerald/30 bg-black/20 px-3 py-1 text-xs text-emerald">
                       nt / GenBank genomic
