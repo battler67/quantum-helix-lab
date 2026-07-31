@@ -21,9 +21,6 @@ export function ScalingComparisonChart({
   return (
     <div className="h-80 rounded-xl border border-white/10 bg-black/30 p-4">
       <div className="text-xs uppercase tracking-widest text-emerald">Query-complexity model</div>
-      <p className="mt-1 text-xs text-muted-foreground">
-        Operation and oracle-query counts—not wall-clock Qiskit or hardware runtime.
-      </p>
       <div className="mt-3 h-60">
         <ResponsiveContainer>
           <LineChart data={data} margin={{ top: 8, right: 12, bottom: 28, left: 4 }}>
