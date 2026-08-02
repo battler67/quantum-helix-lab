@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -27,14 +28,30 @@ from quantum_search_api.services.search.search_orchestrator import SearchOrchest
 
 load_dotenv(Path(__file__).with_name(".env"))
 
+LOCAL_CORS_ORIGINS = (
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+)
+
+
+def configured_cors_origins(raw_origins: str | None = None) -> list[str]:
+    """Return local origins plus exact production origins from the environment."""
+    if raw_origins is None:
+        raw_origins = os.getenv("QDNA_CORS_ORIGINS", "")
+
+    production_origins = [
+        origin.strip().rstrip("/")
+        for origin in raw_origins.split(",")
+        if origin.strip().rstrip("/")
+    ]
+    return list(dict.fromkeys((*LOCAL_CORS_ORIGINS, *production_origins)))
+
+
 app = FastAPI(title="QDNA Genomic Quantum Search API", version="0.1.0")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ],
+    allow_origins=configured_cors_origins(),
     allow_origin_regex=r"http://(localhost|127\.0\.0\.1):\d+",
     allow_credentials=False,
     allow_methods=["GET", "POST", "DELETE"],

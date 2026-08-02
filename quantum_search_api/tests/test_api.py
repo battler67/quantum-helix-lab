@@ -3,7 +3,7 @@ import importlib
 
 from fastapi.testclient import TestClient
 
-from quantum_search_api.app import app, jobs
+from quantum_search_api.app import LOCAL_CORS_ORIGINS, app, configured_cors_origins, jobs
 from quantum_search_api.services.ncbi.models import SearchRequest
 from quantum_search_api.services.search.job_service import SearchJob
 
@@ -13,6 +13,28 @@ def test_health_endpoint():
     response = client.get("/api/health")
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
+
+
+def test_configured_cors_origins_adds_exact_production_origins(monkeypatch):
+    monkeypatch.setenv(
+        "QDNA_CORS_ORIGINS",
+        " https://quantum-helix-lab.vercel.app/, https://preview.example.com,"
+        "https://quantum-helix-lab.vercel.app ",
+    )
+
+    origins = configured_cors_origins()
+
+    assert origins[: len(LOCAL_CORS_ORIGINS)] == list(LOCAL_CORS_ORIGINS)
+    assert origins[-2:] == [
+        "https://quantum-helix-lab.vercel.app",
+        "https://preview.example.com",
+    ]
+
+
+def test_configured_cors_origins_keeps_local_defaults_without_environment(monkeypatch):
+    monkeypatch.delenv("QDNA_CORS_ORIGINS", raising=False)
+
+    assert configured_cors_origins() == list(LOCAL_CORS_ORIGINS)
 
 
 def test_report_endpoint_returns_and_caches_separated_facts_and_interpretations(

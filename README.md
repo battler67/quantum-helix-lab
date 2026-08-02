@@ -158,6 +158,9 @@ size is deliberately bounded for local simulation.
   which are ignored by Git.
 - Real-hardware credentials belong only in `quantum_search_api/.env`; see
   [`docs/REAL_HARDWARE_EXECUTION.md`](docs/REAL_HARDWARE_EXECUTION.md).
+- For a Vercel frontend, set `VITE_QUANTUM_API_BASE_URL` in Vercel to the
+  Render service URL. Set `QDNA_CORS_ORIGINS` in Render to the exact Vercel
+  origin, such as `https://your-project.vercel.app` (without a trailing slash).
 
 ## Development notes
 
