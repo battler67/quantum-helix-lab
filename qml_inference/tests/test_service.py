@@ -60,6 +60,11 @@ class BundleTests(unittest.TestCase):
                 value = self.store.predict(model_id, schema(model_id)["demo"])["calibratedProbability"]
                 self.assertAlmostEqual(value, probability, places=8)
 
+    def test_uci_preprocessing_bundle_has_no_research_package_dependency(self):
+        artifact = BUNDLE / "uci/selected_pipeline.joblib"
+        self.assertNotIn(b"qml_research", artifact.read_bytes())
+        self.assertEqual(self.store.uci_feature_order, ["thal", "cp", "thalach", "ca"])
+
 
 class ApiTests(unittest.TestCase):
     @classmethod

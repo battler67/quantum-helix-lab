@@ -192,8 +192,13 @@ class ModelStore:
         self.fhs_logistic = joblib.load(self.root / "framingham/logistic_pca2/model.joblib")
         self.fhs_lcal = joblib.load(self.root / "framingham/logistic_pca2/calibrator.joblib")
         self.uci_pipeline = joblib.load(self.root / "uci/selected_pipeline.joblib")
-        if list(self.uci_pipeline.feature_order) != ["thal", "cp", "thalach", "ca"]:
+        if not isinstance(self.uci_pipeline, dict) or self.uci_pipeline.get("schemaVersion") != 1:
+            raise ArtifactError("Unsupported UCI preprocessing bundle")
+        self.uci_feature_order = list(self.uci_pipeline.get("featureOrder", ()))
+        if self.uci_feature_order != ["thal", "cp", "thalach", "ca"]:
             raise ArtifactError("UCI preprocessing selected-feature order mismatch")
+        if not {"imputer", "standardScaler"}.issubset(self.uci_pipeline):
+            raise ArtifactError("UCI preprocessing bundle is incomplete")
         self.uci_rbf = joblib.load(self.root / "uci/rbf_svm.joblib")
         self.uci_cal = joblib.load(self.root / "uci/rbf_svm_platt.joblib")
         self._metrics = {
@@ -245,12 +250,14 @@ class ModelStore:
             transformed = {"PCA component 1": float(reduced[0, 0]), "PCA component 2": float(reduced[0, 1])}
             run_id = self.manifest["framinghamRun"]
         else:
-            reduced = self.uci_pipeline.transform(frame)
+            selected = frame.loc[:, self.uci_feature_order]
+            imputed = self.uci_pipeline["imputer"].transform(selected)
+            reduced = np.asarray(self.uci_pipeline["standardScaler"].transform(imputed), dtype=float)
             score = float(self.uci_rbf.decision_function(reduced)[0])
             calibration = self.uci_cal
             backend = {"type": "classical", "name": "scikit-learn"}
             resources = {"qubits": None, "shots": None, "circuitDepth": None}
-            transformed = {name: float(frame.iloc[0][name]) for name in self.uci_pipeline.feature_order}
+            transformed = {name: float(frame.iloc[0][name]) for name in self.uci_feature_order}
             run_id = self.manifest["uciRun"]
         probability = float(calibration.predict_proba(np.array([[score]]))[0, 1])
         threshold = float(self._metrics[model_id].get("selected_threshold", self._metrics[model_id].get("threshold")))
