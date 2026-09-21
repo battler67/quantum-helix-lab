@@ -113,6 +113,7 @@ export function Dashboard() {
           {!collapsed && <div className="font-display text-lg font-semibold">QDNA</div>}
         </div>
         <nav className="flex-1 space-y-1 p-3">
+          <Link to="/qml" className="group flex w-full items-center gap-3 rounded-lg border border-emerald/20 bg-emerald/10 px-3 py-2 text-sm font-medium text-emerald transition hover:bg-emerald/20"><Activity className="h-4 w-4 shrink-0" />{!collapsed && <span>QML Clinical Lab</span>}</Link>
           {sidebarItems.map((item) => (
             <button
               key={item.id}
