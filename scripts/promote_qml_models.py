@@ -12,7 +12,10 @@ import hashlib
 import json
 import shutil
 import statistics
+import sys
 from pathlib import Path
+
+import joblib
 
 
 FRAMINGHAM_RUN = "framingham-audited-20260909"
@@ -90,9 +93,26 @@ def promote(root: Path, target: Path) -> None:
             raise ValueError(f"Missing or changed inventory artifact: {source}")
         dst = target / destination
         dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(src, dst)
+        if destination == "uci/selected_pipeline.joblib":
+            # The research object is a small custom dataclass. Export only its fitted
+            # sklearn objects so deployment does not depend on the research package.
+            sys.path.insert(0, str(root / "src"))
+            try:
+                pipeline = joblib.load(src)
+            finally:
+                sys.path.pop(0)
+            portable = {
+                "schemaVersion": 1,
+                "featureOrder": list(pipeline.feature_order),
+                "imputer": pipeline.imputer,
+                "standardScaler": pipeline.standard_scaler,
+            }
+            joblib.dump(portable, dst, compress=0, protocol=4)
+        else:
+            shutil.copyfile(src, dst)
         manifest_files[destination] = {
             "source": source,
+            "sourceSha256": digest(src),
             "sha256": digest(dst),
             "bytes": dst.stat().st_size,
         }
@@ -142,7 +162,7 @@ def promote(root: Path, target: Path) -> None:
     (target / "evidence.json").write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     manifest = {
         "schemaVersion": 1,
-        "version": "2026-09-21-1",
+        "version": "2026-09-21-2",
         "sourceRepository": "qml-research",
         "framinghamRun": FRAMINGHAM_RUN,
         "framinghamSeed": SEED,

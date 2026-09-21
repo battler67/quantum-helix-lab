@@ -3,47 +3,56 @@
     "framingham/angle_qksvm_pca2/calibrator.joblib": {
       "bytes": 879,
       "sha256": "c73b9ac025f2b14c273178113918220a2ddc46fbff1d014d0de4b16e2030dc29",
-      "source": "results/framingham/framingham-audited-20260909/seed-11/angle_qksvm_pca2/calibrator.joblib"
+      "source": "results/framingham/framingham-audited-20260909/seed-11/angle_qksvm_pca2/calibrator.joblib",
+      "sourceSha256": "c73b9ac025f2b14c273178113918220a2ddc46fbff1d014d0de4b16e2030dc29"
     },
     "framingham/angle_qksvm_pca2/svm.joblib": {
       "bytes": 5691,
       "sha256": "2d9abb56a396a20048233e934fcdd4765b08efd853b3f81a59fc6c9342706dac",
-      "source": "results/framingham/framingham-audited-20260909/seed-11/angle_qksvm_pca2/svm.joblib"
+      "source": "results/framingham/framingham-audited-20260909/seed-11/angle_qksvm_pca2/svm.joblib",
+      "sourceSha256": "2d9abb56a396a20048233e934fcdd4765b08efd853b3f81a59fc6c9342706dac"
     },
     "framingham/angle_qksvm_pca2/training_states.npz": {
       "bytes": 8682,
       "sha256": "cdbb272d19677301b983eebf183140e00160c058e782b730407e2685e35dd73f",
-      "source": "results/framingham/framingham-audited-20260909/seed-11/angle_qksvm_pca2/training_states.npz"
+      "source": "results/framingham/framingham-audited-20260909/seed-11/angle_qksvm_pca2/training_states.npz",
+      "sourceSha256": "cdbb272d19677301b983eebf183140e00160c058e782b730407e2685e35dd73f"
     },
     "framingham/logistic_pca2/calibrator.joblib": {
       "bytes": 879,
       "sha256": "65b4950b356f4348f1d2956480ff9da02b8c03287ae4558c30424fa64f1b3f77",
-      "source": "results/framingham/framingham-audited-20260909/seed-11/logistic_pca2/calibrator.joblib"
+      "source": "results/framingham/framingham-audited-20260909/seed-11/logistic_pca2/calibrator.joblib",
+      "sourceSha256": "65b4950b356f4348f1d2956480ff9da02b8c03287ae4558c30424fa64f1b3f77"
     },
     "framingham/logistic_pca2/model.joblib": {
       "bytes": 879,
       "sha256": "df82cc85cf23918ebb2d8bcfa548baea685ef5fd81c567bfbe759eaba41de7c0",
-      "source": "results/framingham/framingham-audited-20260909/seed-11/logistic_pca2/model.joblib"
+      "source": "results/framingham/framingham-audited-20260909/seed-11/logistic_pca2/model.joblib",
+      "sourceSha256": "df82cc85cf23918ebb2d8bcfa548baea685ef5fd81c567bfbe759eaba41de7c0"
     },
     "framingham/pca2_pipeline.joblib": {
       "bytes": 3393,
       "sha256": "9548c10f8f0b5bb18968d66be911442308e355af84bf87bd02750fe75484dec2",
-      "source": "results/framingham/framingham-audited-20260909/seed-11/pca2_pipeline.joblib"
+      "source": "results/framingham/framingham-audited-20260909/seed-11/pca2_pipeline.joblib",
+      "sourceSha256": "9548c10f8f0b5bb18968d66be911442308e355af84bf87bd02750fe75484dec2"
     },
     "uci/rbf_svm.joblib": {
       "bytes": 6811,
       "sha256": "0ffda1d24e7a39f64d6deec0d671ce63687f9837153c80c78ec16721b2b0b786",
-      "source": "results/ehr_ihd_qml/uci-smoke-20260829T194302Z-3b55c98a85f0/models/rbf_svm.joblib"
+      "source": "results/ehr_ihd_qml/uci-smoke-20260829T194302Z-3b55c98a85f0/models/rbf_svm.joblib",
+      "sourceSha256": "0ffda1d24e7a39f64d6deec0d671ce63687f9837153c80c78ec16721b2b0b786"
     },
     "uci/rbf_svm_platt.joblib": {
       "bytes": 879,
       "sha256": "59ecdd4751d1220fa694f87d876e17fba863eeca037766d9723cff1fdb2bdca1",
-      "source": "results/ehr_ihd_qml/uci-smoke-20260829T194302Z-3b55c98a85f0/calibration/rbf_svm_platt.joblib"
+      "source": "results/ehr_ihd_qml/uci-smoke-20260829T194302Z-3b55c98a85f0/calibration/rbf_svm_platt.joblib",
+      "sourceSha256": "59ecdd4751d1220fa694f87d876e17fba863eeca037766d9723cff1fdb2bdca1"
     },
     "uci/selected_pipeline.joblib": {
-      "bytes": 1986,
-      "sha256": "831608489ac5fbfe14ca92c5f9df1818b05d0d7698285bfaf8fb53d7e628de08",
-      "source": "results/ehr_ihd_qml/uci-smoke-20260829T194302Z-3b55c98a85f0/preprocessing/selected_pipeline.joblib"
+      "bytes": 1393,
+      "sha256": "4dbf480ca2a08854ab2dcd1a41fbfd83d3c2c078451b83e0cba38ca825d55589",
+      "source": "results/ehr_ihd_qml/uci-smoke-20260829T194302Z-3b55c98a85f0/preprocessing/selected_pipeline.joblib",
+      "sourceSha256": "831608489ac5fbfe14ca92c5f9df1818b05d0d7698285bfaf8fb53d7e628de08"
     }
   },
   "framinghamRun": "framingham-audited-20260909",
@@ -67,5 +76,5 @@
   },
   "sourceRepository": "qml-research",
   "uciRun": "uci-smoke-20260829T194302Z-3b55c98a85f0",
-  "version": "2026-09-21-1"
+  "version": "2026-09-21-2"
 }

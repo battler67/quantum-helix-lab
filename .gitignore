@@ -10,6 +10,7 @@
 
 # Python environments and runtime files
 .venv/
+.venv-*/
 venv/
 env/
 **/__pycache__/

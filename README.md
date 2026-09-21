@@ -117,13 +117,15 @@ frontend origins. `QML_BUNDLE_DIR` can point to a versioned, trusted bundle;
 otherwise `qml_inference/artifacts/v1` is used. The service checks hashes and
 library versions at startup and never trains or downloads a model.
 
-The committed serving bundle contains only nine fitted artifacts (~30 KB), a
+The committed serving bundle contains only nine fitted artifacts, a
 manifest and deidentified benchmark evidence. `docs/qml-model-inventory.json`
 catalogues all 213 serialized files found in the sibling `qml-research/` tree,
 including research-only and duplicate files, with hashes. To re-audit or
 promote from the local sibling repository, inspect `scripts/qml_inventory.py`
 and `scripts/promote_qml_models.py`; they check source hashes. Never run
-promotion on untrusted serialized files, and do not add raw datasets or
+promotion on untrusted serialized files. Promotion converts the custom UCI
+feature pipeline into a portable dictionary of fitted scikit-learn objects, so
+the service does not import the research package. Do not add raw datasets or
 participant-level predictions to the portal. Future models need a fitted
 preprocessing pipeline, estimator/calibrator/threshold, schema, recorded
 benchmark evidence, versioned manifest and an exact replay test before they
