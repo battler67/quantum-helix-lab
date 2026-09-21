@@ -12,9 +12,15 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as QuantumSearchResultsRouteImport } from './routes/quantum-search-results'
 import { Route as QuantumSearchRouteImport } from './routes/quantum-search'
 import { Route as QuantumHardwareResultsRouteImport } from './routes/quantum-hardware-results'
+import { Route as QmlRouteImport } from './routes/qml'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as QmlIndexRouteImport } from './routes/qml.index'
+import { Route as QmlResultsRouteImport } from './routes/qml.results'
+import { Route as QmlEvidenceRouteImport } from './routes/qml.evidence'
+import { Route as QmlAnalyzeRouteImport } from './routes/qml.analyze'
 import { Route as NcbiSearchRouteImport } from './routes/ncbi.search'
+import { Route as QmlModelsModelIdRouteImport } from './routes/qml.models.$modelId'
 import { Route as NcbiRecordAccessionRouteImport } from './routes/ncbi.record.$accession'
 import { Route as NcbiOrganismTaxIdRouteImport } from './routes/ncbi.organism.$taxId'
 
@@ -33,6 +39,11 @@ const QuantumHardwareResultsRoute = QuantumHardwareResultsRouteImport.update({
   path: '/quantum-hardware-results',
   getParentRoute: () => rootRouteImport,
 } as any)
+const QmlRoute = QmlRouteImport.update({
+  id: '/qml',
+  path: '/qml',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DashboardRoute = DashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
@@ -43,10 +54,35 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const QmlIndexRoute = QmlIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => QmlRoute,
+} as any)
+const QmlResultsRoute = QmlResultsRouteImport.update({
+  id: '/results',
+  path: '/results',
+  getParentRoute: () => QmlRoute,
+} as any)
+const QmlEvidenceRoute = QmlEvidenceRouteImport.update({
+  id: '/evidence',
+  path: '/evidence',
+  getParentRoute: () => QmlRoute,
+} as any)
+const QmlAnalyzeRoute = QmlAnalyzeRouteImport.update({
+  id: '/analyze',
+  path: '/analyze',
+  getParentRoute: () => QmlRoute,
+} as any)
 const NcbiSearchRoute = NcbiSearchRouteImport.update({
   id: '/ncbi/search',
   path: '/ncbi/search',
   getParentRoute: () => rootRouteImport,
+} as any)
+const QmlModelsModelIdRoute = QmlModelsModelIdRouteImport.update({
+  id: '/models/$modelId',
+  path: '/models/$modelId',
+  getParentRoute: () => QmlRoute,
 } as any)
 const NcbiRecordAccessionRoute = NcbiRecordAccessionRouteImport.update({
   id: '/ncbi/record/$accession',
@@ -62,12 +98,18 @@ const NcbiOrganismTaxIdRoute = NcbiOrganismTaxIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRoute
+  '/qml': typeof QmlRouteWithChildren
   '/quantum-hardware-results': typeof QuantumHardwareResultsRoute
   '/quantum-search': typeof QuantumSearchRoute
   '/quantum-search-results': typeof QuantumSearchResultsRoute
   '/ncbi/search': typeof NcbiSearchRoute
+  '/qml/analyze': typeof QmlAnalyzeRoute
+  '/qml/evidence': typeof QmlEvidenceRoute
+  '/qml/results': typeof QmlResultsRoute
+  '/qml/': typeof QmlIndexRoute
   '/ncbi/organism/$taxId': typeof NcbiOrganismTaxIdRoute
   '/ncbi/record/$accession': typeof NcbiRecordAccessionRoute
+  '/qml/models/$modelId': typeof QmlModelsModelIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -76,31 +118,48 @@ export interface FileRoutesByTo {
   '/quantum-search': typeof QuantumSearchRoute
   '/quantum-search-results': typeof QuantumSearchResultsRoute
   '/ncbi/search': typeof NcbiSearchRoute
+  '/qml/analyze': typeof QmlAnalyzeRoute
+  '/qml/evidence': typeof QmlEvidenceRoute
+  '/qml/results': typeof QmlResultsRoute
+  '/qml': typeof QmlIndexRoute
   '/ncbi/organism/$taxId': typeof NcbiOrganismTaxIdRoute
   '/ncbi/record/$accession': typeof NcbiRecordAccessionRoute
+  '/qml/models/$modelId': typeof QmlModelsModelIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRoute
+  '/qml': typeof QmlRouteWithChildren
   '/quantum-hardware-results': typeof QuantumHardwareResultsRoute
   '/quantum-search': typeof QuantumSearchRoute
   '/quantum-search-results': typeof QuantumSearchResultsRoute
   '/ncbi/search': typeof NcbiSearchRoute
+  '/qml/analyze': typeof QmlAnalyzeRoute
+  '/qml/evidence': typeof QmlEvidenceRoute
+  '/qml/results': typeof QmlResultsRoute
+  '/qml/': typeof QmlIndexRoute
   '/ncbi/organism/$taxId': typeof NcbiOrganismTaxIdRoute
   '/ncbi/record/$accession': typeof NcbiRecordAccessionRoute
+  '/qml/models/$modelId': typeof QmlModelsModelIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
     | '/dashboard'
+    | '/qml'
     | '/quantum-hardware-results'
     | '/quantum-search'
     | '/quantum-search-results'
     | '/ncbi/search'
+    | '/qml/analyze'
+    | '/qml/evidence'
+    | '/qml/results'
+    | '/qml/'
     | '/ncbi/organism/$taxId'
     | '/ncbi/record/$accession'
+    | '/qml/models/$modelId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -109,23 +168,35 @@ export interface FileRouteTypes {
     | '/quantum-search'
     | '/quantum-search-results'
     | '/ncbi/search'
+    | '/qml/analyze'
+    | '/qml/evidence'
+    | '/qml/results'
+    | '/qml'
     | '/ncbi/organism/$taxId'
     | '/ncbi/record/$accession'
+    | '/qml/models/$modelId'
   id:
     | '__root__'
     | '/'
     | '/dashboard'
+    | '/qml'
     | '/quantum-hardware-results'
     | '/quantum-search'
     | '/quantum-search-results'
     | '/ncbi/search'
+    | '/qml/analyze'
+    | '/qml/evidence'
+    | '/qml/results'
+    | '/qml/'
     | '/ncbi/organism/$taxId'
     | '/ncbi/record/$accession'
+    | '/qml/models/$modelId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   DashboardRoute: typeof DashboardRoute
+  QmlRoute: typeof QmlRouteWithChildren
   QuantumHardwareResultsRoute: typeof QuantumHardwareResultsRoute
   QuantumSearchRoute: typeof QuantumSearchRoute
   QuantumSearchResultsRoute: typeof QuantumSearchResultsRoute
@@ -157,6 +228,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof QuantumHardwareResultsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/qml': {
+      id: '/qml'
+      path: '/qml'
+      fullPath: '/qml'
+      preLoaderRoute: typeof QmlRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/dashboard': {
       id: '/dashboard'
       path: '/dashboard'
@@ -171,12 +249,47 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/qml/': {
+      id: '/qml/'
+      path: '/'
+      fullPath: '/qml/'
+      preLoaderRoute: typeof QmlIndexRouteImport
+      parentRoute: typeof QmlRoute
+    }
+    '/qml/results': {
+      id: '/qml/results'
+      path: '/results'
+      fullPath: '/qml/results'
+      preLoaderRoute: typeof QmlResultsRouteImport
+      parentRoute: typeof QmlRoute
+    }
+    '/qml/evidence': {
+      id: '/qml/evidence'
+      path: '/evidence'
+      fullPath: '/qml/evidence'
+      preLoaderRoute: typeof QmlEvidenceRouteImport
+      parentRoute: typeof QmlRoute
+    }
+    '/qml/analyze': {
+      id: '/qml/analyze'
+      path: '/analyze'
+      fullPath: '/qml/analyze'
+      preLoaderRoute: typeof QmlAnalyzeRouteImport
+      parentRoute: typeof QmlRoute
+    }
     '/ncbi/search': {
       id: '/ncbi/search'
       path: '/ncbi/search'
       fullPath: '/ncbi/search'
       preLoaderRoute: typeof NcbiSearchRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/qml/models/$modelId': {
+      id: '/qml/models/$modelId'
+      path: '/models/$modelId'
+      fullPath: '/qml/models/$modelId'
+      preLoaderRoute: typeof QmlModelsModelIdRouteImport
+      parentRoute: typeof QmlRoute
     }
     '/ncbi/record/$accession': {
       id: '/ncbi/record/$accession'
@@ -195,9 +308,28 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface QmlRouteChildren {
+  QmlAnalyzeRoute: typeof QmlAnalyzeRoute
+  QmlEvidenceRoute: typeof QmlEvidenceRoute
+  QmlResultsRoute: typeof QmlResultsRoute
+  QmlIndexRoute: typeof QmlIndexRoute
+  QmlModelsModelIdRoute: typeof QmlModelsModelIdRoute
+}
+
+const QmlRouteChildren: QmlRouteChildren = {
+  QmlAnalyzeRoute: QmlAnalyzeRoute,
+  QmlEvidenceRoute: QmlEvidenceRoute,
+  QmlResultsRoute: QmlResultsRoute,
+  QmlIndexRoute: QmlIndexRoute,
+  QmlModelsModelIdRoute: QmlModelsModelIdRoute,
+}
+
+const QmlRouteWithChildren = QmlRoute._addFileChildren(QmlRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   DashboardRoute: DashboardRoute,
+  QmlRoute: QmlRouteWithChildren,
   QuantumHardwareResultsRoute: QuantumHardwareResultsRoute,
   QuantumSearchRoute: QuantumSearchRoute,
   QuantumSearchResultsRoute: QuantumSearchResultsRoute,

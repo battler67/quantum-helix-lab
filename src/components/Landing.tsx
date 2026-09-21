@@ -101,6 +101,9 @@ export function Landing() {
             <Link to="/ncbi/search" className="hover:text-foreground transition">
               NCBI Search
             </Link>
+            <Link to="/qml" className="hover:text-foreground transition">
+              QML Clinical Lab
+            </Link>
             <a href="#" className="flex items-center gap-1 hover:text-foreground transition">
               <Github className="h-4 w-4" /> GitHub
             </a>
@@ -140,6 +143,7 @@ export function Landing() {
               Search — an interactive lab for the next era of computational biology.
             </motion.p>
             <motion.div variants={fadeUp} className="mt-8 flex flex-wrap items-center gap-3">
+              <Link to="/qml" className="inline-flex items-center gap-2 rounded-full border border-emerald/40 bg-emerald/10 px-6 py-3 text-sm font-semibold text-emerald transition hover:bg-emerald/20"><BrainCircuit className="h-4 w-4" /> QML Clinical Lab</Link>
               <Link
                 to="/dashboard"
                 className="group relative inline-flex items-center gap-2 rounded-full bg-emerald px-6 py-3 text-sm font-semibold text-primary-foreground transition hover:scale-[1.02] glow-emerald"

@@ -15,6 +15,11 @@ See
 Hybrid/Grover theoretical scaling form, formulas, timing assumptions, and
 limitations.
 
+The [QML Clinical Lab user guide](docs/qml-pages-user-guide.md) explains the
+research disease-risk pages and limitations. The [integration specification](docs/qml-integration-spec.md)
+and [complete local artifact inventory](docs/qml-model-inventory.json) record
+model selection and provenance.
+
 ## Repository layout
 
 ```text
@@ -25,6 +30,7 @@ limitations.
 |-- qgsa_grover/            QGSA/Grover exact-pattern circuit package
 |-- frqi_dna/               FRQI DNA comparison package
 |-- quantum_dna/            Standalone and hybrid quantum experiments
+|-- qml_inference/          Separate Python 3.12 QML inference service and small serving bundle
 |-- docs/                   Implementation documentation
 |-- specs/                  Change specifications and verification records
 `-- scripts/                Windows setup and startup helpers
@@ -34,6 +40,7 @@ limitations.
 
 - Git
 - Python 3.13
+- Python 3.12 for the separate QML inference service
 - Bun 1.3
 - Internet access for the initial dependency installation and NCBI-backed searches
 
@@ -89,6 +96,53 @@ The backend health endpoint is:
 ```text
 http://127.0.0.1:8000/api/health
 ```
+
+## QML Clinical Lab setup
+
+The QML pages are under `/qml`; the original genomic backend remains on port
+8000. Start the separate, CPU-only Python 3.12 service in another terminal:
+
+```powershell
+py -3.12 -m venv .venv-qml
+.\.venv-qml\Scripts\python.exe -m pip install -r qml_inference\requirements.txt
+.\.venv-qml\Scripts\python.exe -m qml_inference.server
+```
+
+Its default address is `http://127.0.0.1:8010`, with readiness at
+`/api/qml/v1/health`. The frontend defaults to this local address. For another
+address, set `VITE_QML_API_BASE_URL` (public service origin, no secret) when
+building the frontend. `QML_HOST` and `QML_PORT` (or platform `PORT`) control
+the service listener; `QML_CORS_ORIGINS` is a comma-separated list of exact
+frontend origins. `QML_BUNDLE_DIR` can point to a versioned, trusted bundle;
+otherwise `qml_inference/artifacts/v1` is used. The service checks hashes and
+library versions at startup and never trains or downloads a model.
+
+The committed serving bundle contains only nine fitted artifacts (~30 KB), a
+manifest and deidentified benchmark evidence. `docs/qml-model-inventory.json`
+catalogues all 213 serialized files found in the sibling `qml-research/` tree,
+including research-only and duplicate files, with hashes. To re-audit or
+promote from the local sibling repository, inspect `scripts/qml_inventory.py`
+and `scripts/promote_qml_models.py`; they check source hashes. Never run
+promotion on untrusted serialized files, and do not add raw datasets or
+participant-level predictions to the portal. Future models need a fitted
+preprocessing pipeline, estimator/calibrator/threshold, schema, recorded
+benchmark evidence, versioned manifest and an exact replay test before they
+appear in `/api/qml/v1/models`.
+
+QML checks:
+
+```powershell
+.\.venv-qml\Scripts\python.exe -m unittest qml_inference.tests.test_service -v
+bun run build
+bunx eslint src/components/QmlPages.tsx src/components/QmlEvidenceChart.tsx src/lib/qml-api.ts src/lib/qml-context.tsx src/routes/qml*.tsx
+```
+
+Deployment: use a Python 3.12 service for `qml_inference.server`, reserve
+memory for PennyLane and the fitted bundle, restrict `QML_CORS_ORIGINS` to the
+exact frontend origin, expose HTTPS to the browser, and set
+`VITE_QML_API_BASE_URL` on the frontend deployment. Do not send health rows to
+the genomic backend, AI report generator or external quantum providers. There
+is no authentication or persistent history; the pages are research-use only.
 
 ## Manual setup
 
